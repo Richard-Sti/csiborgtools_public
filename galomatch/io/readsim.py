@@ -1,194 +1,179 @@
-import numpy as np
-import fortranfile as ff
+# PUT HARRY HERE
+import numpy
+from scipy.io import FortranFile
 from os import listdir
-
-outnr = str(184).zfill(5)
-srcdir = '/mnt/extraspace/hdesmond/IC_test3/output_'+outnr
-
-
-infofile = srcdir+'/info_'+outnr+'.txt'
-f = open(infofile, 'r')
-ncpuline = f.readline()
-line = ncpuline.split()
-
-ncpu = int(line[-1])
-print("ncpu:", ncpu)
-
-print("Reading in particles of output", int(srcdir[-5:]))
-
-srcdirlist = listdir(srcdir)
-
-if 'unbinding_'+srcdir[-5:]+'.out00001' not in srcdirlist:
-    print("Couldn't find unbinding_"+srcdir[-5:]+".out00001 in", srcdir)
-    print("use mergertreeplot.py -h or --help to print help message.")
-    quit()
+from os.path import join
+from tqdm import tqdm
 
 
-#-----------------------
-# First read headers
-#-----------------------
-nparts = np.zeros(ncpu, dtype='int32')
-partfiles = [0]*ncpu
+def get_sim_path(n, fname="ramses_out_{}", srcdir="/mnt/extraspace/hdesmond"):
+    """
+    Get a path to a CSiBORG simulation.
 
-for cpu in range(ncpu):
-    srcfile = srcdir+'/part_'+srcdir[-5:]+'.out'+str(cpu+1).zfill(5)
-    partfiles[cpu] = ff.FortranFile(srcfile)
+    Parameters
+    ----------
+    n : int
+        The index of the initial conditions (IC) realisation.
+    fname : str, optional
+        The file name. By default `ramses_out_{}`, where `n` is the IC index.
+    srcdir : str, optional
+        The file path to the folder where realisations of the ICs are stored.
 
-    ncpu = partfiles[cpu].readInts()
-    ndim = partfiles[cpu].readInts()
-    nparts[cpu] = partfiles[cpu].readInts()
-    localseed = partfiles[cpu].readInts()
-    nstar_tot = partfiles[cpu].readInts()
-    mstar_tot = partfiles[cpu].readReals('d')
-    mstar_lost = partfiles[cpu].readReals('d')
-    nsink = partfiles[cpu].readInts()
-
-    del ndim, localseed, nstar_tot, mstar_tot, mstar_lost, nsink
-
-
-#-------------------
-# Allocate arrays
-#-------------------
-nparttot = nparts.sum()
-
-dum = np.zeros(nparttot, dtype='float16')
-
-if i==0:
-    #x = np.zeros(nparttot, dtype='float16')
-    #y = np.zeros(nparttot, dtype='float16')
-    #z = np.zeros(nparttot, dtype='float16')
-
-    mass = np.zeros(nparttot, dtype='float16')
-    ID = np.zeros(nparttot, dtype='int32')
-    
-    level = np.zeros(nparttot, dtype='int32')
-
-    clumpid = np.zeros(nparttot, dtype='int32')
-
-else:
-    #x_inv = np.zeros(nparttot, dtype='float16')
-    #y_inv = np.zeros(nparttot, dtype='float16')
-    #z_inv = np.zeros(nparttot, dtype='float16')
-
-    mass_inv = np.zeros(nparttot, dtype='float16')
-    ID_inv = np.zeros(nparttot, dtype='int32')
-
-    level_inv = np.zeros(nparttot, dtype='int32')
-
-    clumpid_inv = np.zeros(nparttot, dtype='int32')
+    Returns
+    -------
+    path : str
+        The complete path to the `n`th CSiBORG simulation.
+    """
+    return join(srcdir, fname.format(n))
 
 
-#----------------------
-# Read particle data
-#----------------------
+def open_particle(n, simpath, verbose=True):
+    """
+    Open particle files to a given CSiBORG simulation.
 
- #read(1)ncpu2          # What you would do in fortran
- #read(1)ndim2
- #read(1)npart2
- #read(1)
- #read(1)
- #read(1)
- #read(1)
- #read(1)
- #do i=1,ndim
-    #read(1)m
-    #x(1:npart2,i)=m
- #end do
- #! Skip velocity
- #do i=1,ndim
-    #read(1)m
- #end do
- #! Read mass
- #read(1)m
- #if(nstar>0)then
-    #read(1) ! Skip identity
-    #read(1) ! Skip level
-    #read(1)family
-    #read(1)tag
-    #read(1)age
+    Parameters
+    ----------
+    n : int
+        The index of a redshift snapshot.
+    simpath : str
+        The complete path to the CSiBORG simulation.
+    verbose : bool, optional
+        Verbosity flag.
 
-start_ind = np.zeros(ncpu, dtype='int')
-for cpu in range(ncpu-1):
-    start_ind[cpu+1] = nparts[cpu] + start_ind[cpu]
+    Returns
+    -------
+    nparts : 1-dimensional array
+        Number of parts assosiated with each CPU.
+    partfiles : list of `scipy.io.FortranFile`
+        Opened part files.
+    """
+    # Zeros filled snapshot number and the snapshot path
+    nout = str(n).zfill(5)
+    snappath = join(simpath, "output_{}".format(nout))
+    infopath = join(snappath, "info_{}.txt".format(nout))
 
-for cpu in range(ncpu):
-    unbfile = srcdir+'/unbinding_'+srcdir[-5:]+'.out'+str(cpu+1).zfill(5)
-    unbffile = ff.FortranFile(unbfile)
+    with open(infopath, "r") as f:
+        ncpu = int(f.readline().split()[-1])
+    if verbose:
+        print("Reading in output `{}` with ncpu = `{}`.".format(nout, ncpu))
 
-    dum[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')      # Think they're stored as double so must read as double
-    dum[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')      # Positions
-    dum[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')
+    # Check whether the unbinding file exists.
+    snapdirlist = listdir(snappath)
+    unbinding_file = "unbinding_{}.out00001".format(nout)
+    if unbinding_file not in snapdirlist:
+        raise FileNotFoundError(
+            "Couldn't find `{}` in `{}`. Use mergertreeplot.py -h or --help to "
+            "print help message.".format(unbinding_file, snappath))
 
-    dum[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')      # Velocities; this all just overwrites itself
-    dum[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')
-    dum[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')
+    # First read the headers. Reallocate arrays and fill them.
+    nparts = numpy.zeros(ncpu, dtype=int)
+    partfiles = [None] * ncpu
+    for cpu in range(ncpu):
+        cpu_str = str(cpu + 1).zfill(5)
+        fpath = join(snappath, "part_{}.out{}".format(nout, cpu_str))
 
-    mass[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')     # Mass
+        f = FortranFile(fpath)
+        # Read in this order
+        ncpuloc = f.read_ints()
+        if ncpuloc != ncpu:
+            raise ValueError("`ncpu = {}` of `{}` disagrees with `ncpu = {}` "
+                             "of `{}`.".format(ncpu, infopath, ncpuloc, fpath))
+        ndim = f.read_ints()
+        nparts[cpu] = f.read_ints()
+        localseed = f.read_ints()
+        nstar_tot = f.read_ints()
+        mstar_tot = f.read_reals('d')
+        mstar_lost = f.read_reals('d')
+        nsink = f.read_ints()
 
-    #vx[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')
-    #vy[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')
-    #vz[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')
+        partfiles[cpu] = f
 
-    #mass[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readReals('d')
-    ID[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readInts()
-
-    level[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = partfiles[cpu].readInts()
-
-    clumpid[start_ind[cpu]:start_ind[cpu]+nparts[cpu]] = unbffile.readInts()
-
-del dum
-
-
-print("Minimum clump ID:", np.min(clumpid))      # This is the clump a particle has been assigned to, so min should be 0 which means not in clump
-clumpid = np.absolute(clumpid)                  # Not sure why this is here...
-
-
-#random.shuffle(ID); random.shuffle(ID_inv)          # If the IDs are randomised but not the clumpIDs then all of the below should be random
-
-print(np.min(ID), np.median(ID), np.mean(ID), np.max(ID))
-print(np.min(ID_inv), np.median(ID_inv), np.mean(ID_inv), np.max(ID_inv))
-
-print(np.min(level), np.median(level), np.mean(level), np.max(level))
-print(np.min(level_inv), np.median(level_inv), np.mean(level_inv), np.max(level_inv))
-
-print(np.min(mass), np.median(mass), np.mean(mass), np.max(mass))
-print(np.min(mass_inv), np.median(mass_inv), np.mean(mass_inv), np.max(mass_inv))
-
-#plt.clf()
-#plt.hist(mass)
-#plt.show()
+    return nparts, partfiles
 
 
-#index  lev  parent(2)  ncell    peak_x   peak_y(5)   peak_z  rho-       rho+(8)      rho_av    mass_cl   relevance(11)
-clumparr = np.genfromtxt(srcdir1+"/clump_"+outnr1+".dat")
-clumparr_inv = np.genfromtxt(srcdir2+"/clump_"+outnr2+".dat")
+def read_sp(dtype, partfile):
+    """
+    Utility function to read a single particle file, depending on the dtype.
 
-clumpID, parent, Mclump = clumparr[:,0].astype(int), clumparr[:,2].astype(int), clumparr[:,10]
-clumpID_inv, parent_inv, Mclump_inv = clumparr_inv[:,0].astype(int), clumparr_inv[:,2].astype(int), clumparr_inv[:,10]
+    Parameters
+    ----------
+    dtype : str
+        The dtype of the part file to be read now.
+    partfile : `scipy.io.FortranFile`
+        Part file to read from.
 
-#clumpID_main = clumpID[clumpID==parent]      # IDs of main halos only from the clump file
-#clumpID_main_inv = clumpID_inv[clumpID_inv==parent_inv]
+    Returns
+    -------
+    out : 1-dimensional array
+        The data read from the part file.
+    n : int
+        The index of the initial conditions (IC) realisation.
+    simpath : str
+        The complete path to the CSiBORG simulation.
+    """
+    if dtype in ["float16", "float32", "float64"]:
+        return partfile.read_reals('d')
+    elif dtype in ["int32", "int64"]:
+        return partfile.read_ints()
+    else:
+        raise TypeError("Unexpected dtype `{}`.".format(dtype))
 
-#clumpID_big = clumpID[Mclump>np.median(Mclump)]         # IDs of halos more massive than the median
-#clumpID_big_inv = clumpID_inv[Mclump_inv>np.median(Mclump_inv)]
 
-clumpID_big = clumpID[Mclump>np.percentile(Mclump, 90)]
-clumpID_big_inv = clumpID_inv[Mclump_inv>np.percentile(Mclump_inv, 90)]
+def read_particle(pars_extract, n, simpath, verbose=True):
+    """
+    Read particle files of a simulation at a given snapshot and return
+    values of `pars_extract`.
 
-#clumpID_small = clumpID[Mclump<=np.median(Mclump)]         # IDs of halos more massive than the median
-#clumpID_small_inv = clumpID_inv[Mclump_inv<=np.median(Mclump_inv)]
+    Parameters
+    ----------
+    pars_extract : list of str
+        Parameters to be extacted.
+    n : int
+        The index of the redshift snapshot.
+    simpath : str
+        The complete path to the CSiBORG simulation.
+    verbose : bool, optional
+        Verbosity flag while for reading the CPU outputs.
 
+    Returns
+    -------
+    out : structured array
+        The data read from the particle file.
+    """
+    # Open the particle files
+    nparts, partfiles = open_particle(n, simpath)
+    ncpu = nparts.size
+    # Order in which the particles are written in the FortranFile
+    forder = [("x", "float16"), ("y", "float16"), ("z", "float16"),
+              ("vx", "float16"), ("vy", "float16"), ("vz", "float16"),
+              ("M", "float16"), ("ID", "int32"), ("level", "int32")]
+    fnames = [fp[0] for fp in forder]
+    fdtypes = [fp[1] for fp in forder]
+    # Check there are no strange parameters
+    for p in pars_extract:
+        if p not in fnames:
+            raise ValueError("Undefined parameter `{}`. Must be one of `{}`."
+                             .format(p, fnames))
 
-#[np.where(clumpid==x) for x in clumpID_main]
+    npart_tot = numpy.sum(nparts)
+    # A dummy array is necessary for reading the fortran files.
+    dum = numpy.full(npart_tot, numpy.nan, dtype="float16")
+    # These are the data we read along with types
+    dtype = {"names": pars_extract,
+             "formats": [forder[fnames.index(p)][1] for p in pars_extract]}
+    # Allocate the output structured array
+    out = numpy.full(npart_tot, numpy.nan, dtype)
+    # Loop indices
+    start_ind = numpy.zeros(ncpu, dtype=int)
+    start_ind[1:] = numpy.cumsum(nparts)[:-1]
+    iters = tqdm(range(ncpu)) if verbose else range(ncpu)
+    for cpu in iters:
+        i = start_ind[cpu]
+        j = nparts[cpu]
+        for (fname, fdtype) in zip(fnames, fdtypes):
+            if fname in pars_extract:
+                out[fname][i:i + j] = read_sp(fdtype, partfiles[cpu])
+            else:
+                dum[i:i + j] = read_sp(fdtype, partfiles[cpu])
 
-print("CHECK:", len(ID), len(ID_inv), len(np.intersect1d(ID, ID_inv)), "(should all be the same)")
-
-print("Total number of clumps in the two sims:", len(clumparr), len(clumparr_inv))
-
-print("Total number of particles in the two sims:", len(ID), len(ID_inv), "(should be the same)")
-
-print("Fraction of particles within halos in the two sims:", round(len(ID[clumpid!=0])/float(len(ID)), 6), round(len(ID_inv[clumpid_inv!=0])/float(len(ID)), 6))
-print("Fraction of particles within halos in *both* sims:", round(len(np.intersect1d(ID[clumpid!=0], ID_inv[clumpid_inv!=0]))/float(len(np.intersect1d(ID, ID_inv))), 6), "(random value =", round(len(ID[clumpid!=0])/float(len(ID)) * len(ID_inv[clumpid_inv!=0])/float(len(ID_inv)), 6), "), ratio =", round(len(np.intersect1d(ID[clumpid!=0], ID_inv[clumpid_inv!=0]))/float(len(np.intersect1d(ID, ID_inv))) / (len(ID[clumpid!=0])/float(len(ID)) * len(ID_inv[clumpid_inv!=0])/float(len(ID_inv))), 3))
-
-print("Fraction of particles in massive halos in the two sims:", round(np.sum(np.in1d(clumpid, clumpID_big))/float(len(ID)), 6), round(np.sum(np.in1d(clumpid_inv, clumpID_big_inv))/float(len(ID)), 6))
-print("Fraction of particles in massive halos in *both* sims:", round(len(np.intersect1d(ID[np.in1d(clumpid, clumpID_big)], ID_inv[np.in1d(clumpid_inv, clumpID_big_inv)]))/float(len(np.intersect1d(ID, ID_inv))), 6), "(random value =", round(np.sum(np.in1d(clumpid, clumpID_big))/float(len(ID)) * np.sum(np.in1d(clumpid_inv, clumpID_big_inv))/float(len(ID)), 6), "), ratio =", round(len(np.intersect1d(ID[np.in1d(clumpid, clumpID_big)], ID_inv[np.in1d(clumpid_inv, clumpID_big_inv)]))/float(len(np.intersect1d(ID, ID_inv))) / (np.sum(np.in1d(clumpid, clumpID_big))/float(len(ID)) * np.sum(np.in1d(clumpid_inv, clumpID_big_inv))/float(len(ID_inv))), 3))
+    return out
