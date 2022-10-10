@@ -119,6 +119,23 @@ def read_sp(dtype, partfile):
         raise TypeError("Unexpected dtype `{}`.".format(dtype))
 
 
+def nparts_to_start_ind(nparts):
+    """
+    Convert `nparts` array to starting indices in a pre-allocated array for looping over the CPU number.
+
+    Parameters
+    ----------
+    nparts : 1-dimensional array
+        Number of parts assosiated with each CPU.
+
+    Returns
+    -------
+    start_ind : 1-dimensional array
+        The starting indices calculated as a cumulative sum starting at 0.
+    """
+    return numpy.hstack([[0], numpy.cumsum(nparts[:-1])])
+
+
 def read_particle(pars_extract, n, simpath, verbose=True):
     """
     Read particle files of a simulation at a given snapshot and return
@@ -163,9 +180,7 @@ def read_particle(pars_extract, n, simpath, verbose=True):
              "formats": [forder[fnames.index(p)][1] for p in pars_extract]}
     # Allocate the output structured array
     out = numpy.full(npart_tot, numpy.nan, dtype)
-    # Loop indices
-    start_ind = numpy.zeros(ncpu, dtype=int)
-    start_ind[1:] = numpy.cumsum(nparts)[:-1]
+    start_ind = nparts_to_start_ind((nparts))
     iters = tqdm(range(ncpu)) if verbose else range(ncpu)
     for cpu in iters:
         i = start_ind[cpu]
