@@ -9,8 +9,8 @@ from tqdm import tqdm
 F16 = numpy.float16
 F32 = numpy.float32
 F64 = numpy.float64
-I32 = numpy.I32
-I64 = numpy.I64
+I32 = numpy.int32
+I64 = numpy.int64
 
 
 def get_sim_path(n, fname="ramses_out_{}", srcdir="/mnt/extraspace/hdesmond"):
@@ -261,22 +261,39 @@ def read_clumpid(n, simpath, verbose=True):
 
     return clumpid
 
+
 def read_clumps(n, simpath):
-    pass
-#     n = str(n).zfill(5)
-#     fname = join(simpath, "output_{}".format(n), "clump_{}.dat".format(n))
-#
-#     if not isfile(fname):
-#         raise FileExistsError("Clump file `{}` does not exist.".format(fname))
-#
-#     arr = numpy.genfromtxt(fname)
-#
-#     cols = [("index", I64)]
-#
-#
-#
-#     return arr
+    """
+    Read in a precomputed clump file `clump_N.dat`.
 
+    Parameters
+    ----------
+    n : int
+        The index of a redshift snapshot.
+    simpath : str
+        The complete path to the CSiBORG simulation.
 
-#index  lev  parent(2)  ncell    peak_x   peak_y(5)   peak_z  rho-       rho+(8)      rho_av    mass_cl   relevance(11)
-#clumparr = numpy.genfromtxt(srcdir1+"/clump_"+outnr1+".dat")
+    Returns
+    -------
+    out : structured array
+        Structured array of the clumps.
+    """
+    n = str(n).zfill(5)
+    fname = join(simpath, "output_{}".format(n), "clump_{}.dat".format(n))
+    # Check the file exists.
+    if not isfile(fname):
+        raise FileExistsError("Clump file `{}` does not exist.".format(fname))
+
+    # Read in the clump array. This is how the columns must be written!
+    arr = numpy.genfromtxt(fname)
+    cols = [("index", I64), ("level", I64), ("parent", I64), ("ncell", F64),
+            ("peak_x", F64), ("peak_y", F64), ("peak_z", F64),
+            ("rho-", F64), ("rho+", F64), ("rho_av", F64),
+            ("mass_cl", F64), ("relevance", F64)]
+    # Write to a structured array
+    dtype = {"names": [col[0] for col in cols],
+            "formats": [col[1] for col in cols]}
+    out = numpy.full(arr.shape[0], numpy.nan, dtype=dtype)
+    for i, name in enumerate(dtype["names"]):
+        out[name] = arr[:, i]
+    return out
