@@ -202,5 +202,60 @@ def read_particle(pars_extract, n, simpath, verbose=True):
     return out
 
 
-def read_unbibding():
-    pass
+def open_unbinding(cpu, n, simpath):
+    """
+    Open particle files to a given CSiBORG simulation. Note that to be consistent CPU is incremented by 1.
+
+    Parameters
+    ----------
+    cpu : int
+        The CPU index.
+    n : int
+        The index of a redshift snapshot.
+    simpath : str
+        The complete path to the CSiBORG simulation.
+
+    Returns
+    -------
+    unbinding : `scipy.io.FortranFile`
+        The opened unbinding FortranFile.
+    """
+    nout = str(n).zfill(5)
+    cpu = str(cpu + 1).zfill(5)
+    fpath = join(simpath, "output_{}".format(nout),
+                 "unbinding_{}.out{}".format(nout, cpu))
+
+    return FortranFile(fpath)
+
+
+def read_clumpid(n, simpath, verbose=True):
+    """
+    Read clump IDs from unbinding files.
+
+    Parameters
+    ----------
+    n : int
+        The index of a redshift snapshot.
+    simpath : str
+        The complete path to the CSiBORG simulation.
+    verbose : bool, optional
+        Verbosity flag while for reading the CPU outputs.
+
+    Returns
+    -------
+    clumpid : 1-dimensional array
+        The array of clump IDs.
+    """
+    nparts, __ = open_particle(n, simpath, verbose)
+    start_ind = nparts_to_start_ind(nparts)
+    ncpu = nparts.size
+
+    clumpid = numpy.full(numpy.sum(nparts), numpy.nan)
+    iters = tqdm(range(ncpu)) if verbose else range(ncpu)
+    for cpu in iters:
+        i = start_ind[cpu]
+        j = nparts[cpu]
+        ff = open_unbinding(cpu, n, simpath)
+        clumpid[i:i + j] = ff.read_ints()
+
+    return clumpid
