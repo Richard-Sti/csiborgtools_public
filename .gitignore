@@ -1,0 +1,6 @@
+venv_galomatch/
+share/
+bin/
+.bashrc
+*.pyc
+*/.ipynb_checkpoints/
