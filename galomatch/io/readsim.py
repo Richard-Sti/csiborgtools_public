@@ -2,14 +2,15 @@
 import numpy
 from scipy.io import FortranFile
 from os import listdir
-from os.path import join
+from os.path import (join, isfile)
 from tqdm import tqdm
 
 
 F16 = numpy.float16
 F32 = numpy.float32
 F64 = numpy.float64
-INT32 = numpy.int32
+I32 = numpy.I32
+I64 = numpy.I64
 
 
 def get_sim_path(n, fname="ramses_out_{}", srcdir="/mnt/extraspace/hdesmond"):
@@ -119,7 +120,7 @@ def read_sp(dtype, partfile):
     """
     if dtype in [F16, F32, F64]:
         return partfile.read_reals('d')
-    elif dtype in [INT32]:
+    elif dtype in [I32]:
         return partfile.read_ints()
     else:
         raise TypeError("Unexpected dtype `{}`.".format(dtype))
@@ -171,7 +172,7 @@ def read_particle(pars_extract, n, simpath, verbose=True):
     # Order in which the particles are written in the FortranFile
     forder = [("x", F16), ("y", F16), ("z", F16),
               ("vx", F16), ("vy", F16), ("vz", F16),
-              ("M", F32), ("ID", INT32), ("level", INT32)]
+              ("M", F32), ("ID", I32), ("level", I32)]
     fnames = [fp[0] for fp in forder]
     fdtypes = [fp[1] for fp in forder]
     # Check there are no strange parameters
@@ -259,3 +260,23 @@ def read_clumpid(n, simpath, verbose=True):
         clumpid[i:i + j] = ff.read_ints()
 
     return clumpid
+
+def read_clumps(n, simpath):
+    pass
+#     n = str(n).zfill(5)
+#     fname = join(simpath, "output_{}".format(n), "clump_{}.dat".format(n))
+#
+#     if not isfile(fname):
+#         raise FileExistsError("Clump file `{}` does not exist.".format(fname))
+#
+#     arr = numpy.genfromtxt(fname)
+#
+#     cols = [("index", I64)]
+#
+#
+#
+#     return arr
+
+
+#index  lev  parent(2)  ncell    peak_x   peak_y(5)   peak_z  rho-       rho+(8)      rho_av    mass_cl   relevance(11)
+#clumparr = numpy.genfromtxt(srcdir1+"/clump_"+outnr1+".dat")
