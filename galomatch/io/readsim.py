@@ -11,6 +11,8 @@ F32 = numpy.float32
 F64 = numpy.float64
 I32 = numpy.int32
 I64 = numpy.int64
+BOXSIZE = 677.7  # Mpc/h. Otherwise positions in [0, 1].
+BOXMASS = 3.749e19  # Msun
 
 
 def get_sim_path(n, fname="ramses_out_{}", srcdir="/mnt/extraspace/hdesmond"):
@@ -297,3 +299,52 @@ def read_clumps(n, simpath):
     for i, name in enumerate(dtype["names"]):
         out[name] = arr[:, i]
     return out
+
+
+def convert_mass_cols(arr, cols):
+    """
+    Convert mass columns from box units to :math:`M_{odot}`. `arr` is passed by
+    reference and is not explicitly returned back.
+
+    TODO: check about little h
+
+    Parameters
+    ----------
+    arr : structured array
+        The array whose columns are to be converted.
+    cols : str or list of str
+        The mass columns to be converted.
+
+    Returns
+    -------
+    None
+    """
+    cols = [cols] if isinstance(cols, str) else cols
+    for col in cols:
+        arr[col] *= BOXMASS
+
+
+def convert_position_cols(arr, cols, zero_centered=False):
+    """
+    Convert position columns from box units to :math:`Mpc / h`. `arr` is
+    passed by reference and is not explicitly returned back.
+
+    Parameters
+    ----------
+    arr : structured array
+        The array whose columns are to be converted.
+    cols : str or list of str
+        The mass columns to be converted.
+    zero_centered : bool, optional
+        Whether to translate the well-resolved origin in the centre of the
+        simulation to the :math:`(0, 0 , 0)` point.
+
+    Returns
+    -------
+    None
+    """
+    cols = [cols] if isinstance(cols, str) else cols
+    for col in cols:
+        arr[col] *= BOXSIZE
+        if zero_centered:
+            arr[col] -= BOXSIZE / 2

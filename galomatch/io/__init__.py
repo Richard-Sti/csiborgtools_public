@@ -14,4 +14,5 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 from .readsim import (get_sim_path, open_particle, open_unbinding,
-                      read_particle, read_clumpid, read_clumps)
+                      read_particle, read_clumpid, read_clumps,
+                      convert_mass_cols, convert_position_cols)
