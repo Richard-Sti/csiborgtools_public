@@ -6,6 +6,12 @@ from os.path import join
 from tqdm import tqdm
 
 
+F16 = numpy.float16
+F32 = numpy.float32
+F64 = numpy.float64
+INT32 = numpy.int32
+
+
 def get_sim_path(n, fname="ramses_out_{}", srcdir="/mnt/extraspace/hdesmond"):
     """
     Get a path to a CSiBORG simulation.
@@ -159,11 +165,13 @@ def read_particle(pars_extract, n, simpath, verbose=True):
     """
     # Open the particle files
     nparts, partfiles = open_particle(n, simpath)
+    if verbose:
+        print("Opened {} particle files.".format(nparts.size))
     ncpu = nparts.size
     # Order in which the particles are written in the FortranFile
-    forder = [("x", "float16"), ("y", "float16"), ("z", "float16"),
-              ("vx", "float16"), ("vy", "float16"), ("vz", "float16"),
-              ("M", "float16"), ("ID", "int32"), ("level", "int32")]
+    forder = [("x", F16), ("y", F16), ("z", F16),
+              ("vx", F16), ("vy", F16), ("vz", F16),
+              ("M", F32), ("ID", INT32), ("level", INT32)]
     fnames = [fp[0] for fp in forder]
     fdtypes = [fp[1] for fp in forder]
     # Check there are no strange parameters
@@ -192,3 +200,7 @@ def read_particle(pars_extract, n, simpath, verbose=True):
                 dum[i:i + j] = read_sp(fdtype, partfiles[cpu])
 
     return out
+
+
+def read_unbibding():
+    pass
