@@ -3,3 +3,4 @@ share/
 bin/
 .bashrc
 *.pyc
+*/.ipynb_checkpoints/
