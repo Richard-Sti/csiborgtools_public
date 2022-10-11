@@ -117,9 +117,9 @@ def read_sp(dtype, partfile):
     simpath : str
         The complete path to the CSiBORG simulation.
     """
-    if dtype in ["float16", "float32", "float64"]:
+    if dtype in [F16, F32, F64]:
         return partfile.read_reals('d')
-    elif dtype in ["int32", "int64"]:
+    elif dtype in [INT32]:
         return partfile.read_ints()
     else:
         raise TypeError("Unexpected dtype `{}`.".format(dtype))
@@ -182,7 +182,7 @@ def read_particle(pars_extract, n, simpath, verbose=True):
 
     npart_tot = numpy.sum(nparts)
     # A dummy array is necessary for reading the fortran files.
-    dum = numpy.full(npart_tot, numpy.nan, dtype="float16")
+    dum = numpy.full(npart_tot, numpy.nan, dtype=F16)
     # These are the data we read along with types
     dtype = {"names": pars_extract,
              "formats": [forder[fnames.index(p)][1] for p in pars_extract]}
