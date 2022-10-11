@@ -27,7 +27,8 @@ F32 = numpy.float32
 F64 = numpy.float64
 I32 = numpy.int32
 I64 = numpy.int64
-BOXSIZE = 677.7  # Mpc/h. Otherwise positions in [0, 1].
+little_h = 0.705
+BOXSIZE = 677.7 / little_h  # Mpc. Otherwise positions in [0, 1].
 BOXMASS = 3.749e19  # Msun
 
 
@@ -322,8 +323,6 @@ def convert_mass_cols(arr, cols):
     Convert mass columns from box units to :math:`M_{odot}`. `arr` is passed by
     reference and is not explicitly returned back.
 
-    TODO: check about little h
-
     Parameters
     ----------
     arr : structured array
@@ -342,7 +341,7 @@ def convert_mass_cols(arr, cols):
 
 def convert_position_cols(arr, cols, zero_centered=False):
     """
-    Convert position columns from box units to :math:`Mpc / h`. `arr` is
+    Convert position columns from box units to :math:`\mathrm{Mpc}`. `arr` is
     passed by reference and is not explicitly returned back.
 
     Parameters
