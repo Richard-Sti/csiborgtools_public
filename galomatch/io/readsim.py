@@ -339,7 +339,7 @@ def convert_mass_cols(arr, cols):
         arr[col] *= BOXMASS
 
 
-def convert_position_cols(arr, cols, zero_centered=False):
+def convert_position_cols(arr, cols, zero_centered=True):
     """
     Convert position columns from box units to :math:`\mathrm{Mpc}`. `arr` is
     passed by reference and is not explicitly returned back.
@@ -352,7 +352,7 @@ def convert_position_cols(arr, cols, zero_centered=False):
         The mass columns to be converted.
     zero_centered : bool, optional
         Whether to translate the well-resolved origin in the centre of the
-        simulation to the :math:`(0, 0 , 0)` point.
+        simulation to the :math:`(0, 0 , 0)` point. By default `True`.
 
     Returns
     -------
