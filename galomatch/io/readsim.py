@@ -19,7 +19,10 @@ import numpy
 from scipy.io import FortranFile
 from os import listdir
 from os.path import (join, isfile)
+from glob import glob
 from tqdm import tqdm
+
+from ..utils import cols_to_structured
 
 
 F16 = numpy.float16
@@ -30,6 +33,37 @@ I64 = numpy.int64
 little_h = 0.705
 BOXSIZE = 677.7 / little_h  # Mpc. Otherwise positions in [0, 1].
 BOXMASS = 3.749e19  # Msun
+
+
+def get_csiborg_ids(srcdir):
+    """
+    Get CSiBORG simulation IDs from the list of folders in `srcdir`.
+    Assumes that the folders look like `ramses_out_X` and extract the `X`
+    integer. Removes `5511` from the list of IDs.
+
+    Parameters
+    ----------
+    srcdir : string
+        The folder where CSiBORG simulations are stored.
+
+    Returns
+    -------
+    ids : 1-dimensional array
+        Array of CSiBORG simulation IDs.
+    """
+    files = glob(join(srcdir, "ramses_out*"))
+    # Select only file names
+    files = [f.split("/")[-1] for f in files]
+    # Remove files with inverted ICs
+    files = [f for f in files if "_inv" not in f]
+    # Remove the filename with _old
+    files = [f for f in files if "OLD" not in f]
+    ids = [int(f.split("_")[-1]) for f in files]
+    try:
+        ids.remove(5511)
+    except ValueError:
+        pass
+    return numpy.sort(ids)
 
 
 def get_sim_path(n, fname="ramses_out_{}", srcdir="/mnt/extraspace/hdesmond"):
@@ -309,13 +343,43 @@ def read_clumps(n, simpath):
             ("peak_x", F64), ("peak_y", F64), ("peak_z", F64),
             ("rho-", F64), ("rho+", F64), ("rho_av", F64),
             ("mass_cl", F64), ("relevance", F64)]
-    # Write to a structured array
-    dtype = {"names": [col[0] for col in cols],
-            "formats": [col[1] for col in cols]}
-    out = numpy.full(arr.shape[0], numpy.nan, dtype=dtype)
-    for i, name in enumerate(dtype["names"]):
+    out = cols_to_structured(arr.shape[0], cols)
+    for i, name in enumerate(out.dtype.names):
         out[name] = arr[:, i]
     return out
+
+
+def read_mmain(n, srcdir, fname="Mmain_{}.npy"):
+    """
+    Read `mmain` numpy arrays of central halos whose mass contains their
+    substracture contribution.
+
+    Parameters
+    ----------
+    n : int
+        The index of the initial conditions (IC) realisation.
+    srcdir : str
+        The path to the folder containing the files.
+    fname : str, optional
+        The file name convention.  By default `Mmain_{}.npy`, where the
+        substituted value is `n`.
+
+    Returns
+    -------
+    out : structured array
+        Array with the central halo information.
+    """
+    fpath = join(srcdir, fname.format(n))
+    arr = numpy.load(fpath)
+
+    cols = [("index", I64), ("peak_x", F64), ("peak_y", F64),
+            ("peak_z", F64), ("mass_cl", F64), ("sub_frac", F64)]
+    out = cols_to_structured(arr.shape[0], cols)
+    for i, name in enumerate(out.dtype.names):
+        out[name] = arr[:, i]
+
+    return out
+
 
 
 def convert_mass_cols(arr, cols):
