@@ -5,3 +5,4 @@ bin/
 *.pyc
 */.ipynb_checkpoints/
 plots/*
+.vscode/settings.json
