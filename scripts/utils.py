@@ -22,7 +22,7 @@ from tqdm import trange
 from astropy.cosmology import FlatLambdaCDM
 
 try:
-    import galomatch
+    import csiborgtools
 except ModuleNotFoundError:
     import sys
     sys.path.append("../")
@@ -30,19 +30,21 @@ except ModuleNotFoundError:
 
 def load_mmain_convert(n):
     srcdir = "/users/hdesmond/Mmain"
-    arr = galomatch.io.read_mmain(n, srcdir)
+    arr = csiborgtools.io.read_mmain(n, srcdir)
 
-    galomatch.utils.convert_mass_cols(arr, "mass_cl")
-    galomatch.utils.convert_position_cols(arr, ["peak_x", "peak_y", "peak_z"])
-    galomatch.utils.flip_cols(arr, "peak_x", "peak_z")
+    csiborgtools.utils.convert_mass_cols(arr, "mass_cl")
+    csiborgtools.utils.convert_position_cols(
+        arr, ["peak_x", "peak_y", "peak_z"])
+    csiborgtools.utils.flip_cols(arr, "peak_x", "peak_z")
 
-    d, ra, dec = galomatch.utils.cartesian_to_radec(arr)
-    arr = galomatch.utils.add_columns(arr, [d, ra, dec], ["dist", "ra", "dec"])
+    d, ra, dec = csiborgtools.utils.cartesian_to_radec(arr)
+    arr = csiborgtools.utils.add_columns(
+        arr, [d, ra, dec], ["dist", "ra", "dec"])
     return arr
 
 
 def load_mmains(N=None, verbose=True):
-    ids = galomatch.io.get_csiborg_ids("/mnt/extraspace/hdesmond")
+    ids = csiborgtools.io.get_csiborg_ids("/mnt/extraspace/hdesmond")
     N = ids.size if N is None else N
     if N > ids.size:
         raise ValueError("`N` cannot be larger than 101.")
@@ -62,11 +64,11 @@ def load_mmains(N=None, verbose=True):
 
 def load_planck2015(max_comdist=214):
     cosmo = FlatLambdaCDM(H0=70.5, Om0=0.307, Tcmb0=2.728)
-    fpath = ("/mnt/zfsusers/rstiskalek/galomatch/"
+    fpath = ("/mnt/zfsusers/rstiskalek/csiborgtools/"
              + "data/HFI_PCCS_SZ-union_R2.08.fits")
-    return galomatch.io.read_planck2015(fpath, cosmo, max_comdist)
+    return csiborgtools.io.read_planck2015(fpath, cosmo, max_comdist)
 
 
 def load_2mpp():
     cosmo = FlatLambdaCDM(H0=70.5, Om0=0.307, Tcmb0=2.728)
-    return galomatch.io.read_2mpp("../data/2M++_galaxy_catalog.dat", cosmo)
+    return csiborgtools.io.read_2mpp("../data/2M++_galaxy_catalog.dat", cosmo)
