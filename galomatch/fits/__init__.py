@@ -12,9 +12,3 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-
-from .readsim import (get_csiborg_ids, get_sim_path, get_snapshot_path,  # noqa
-                      read_info,  # noqa
-                      open_particle, open_unbinding, read_particle,  # noqa
-                      read_clumpid, read_clumps, read_mmain)  # noqa
-from .readobs import (read_planck2015, read_2mpp)  # noqa

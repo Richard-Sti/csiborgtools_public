@@ -12,10 +12,13 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+"""
+Utilility functions for manipulation structured arrays.
+"""
 
-"""Utilility functions for manipulation structured arrays."""
 
 import numpy
+
 
 def cols_to_structured(N, cols):
     """
@@ -84,6 +87,7 @@ def add_columns(arr, X, cols):
 
     return out
 
+
 def rm_columns(arr, cols):
     """
     Remove columns `cols` from a record array `arr`. Creates a new array.
@@ -143,7 +147,7 @@ def list_to_ndarray(arrs, cols):
         raise TypeError("`arrs` must be a list of structured arrays.")
     cols = [cols] if isinstance(cols, str) else cols
 
-    Narr  = len(arrs)
+    Narr = len(arrs)
     Nobj_max = max([arr.size for arr in arrs])
     Ncol = len(cols)
     # Preallocate the array and fill it
@@ -153,3 +157,55 @@ def list_to_ndarray(arrs, cols):
         for j in range(Ncol):
             out[i, :Nobj, j] = arrs[i][cols[j]]
     return out
+
+
+def array_to_structured(arr, cols):
+    """
+    Create a structured array from a 2-dimensional array.
+
+    Parameters
+    ----------
+    arr : 2-dimensional array
+        Original array of shape `(n_samples, n_cols)`.
+    cols : list of str
+        Columns of the structured array
+
+    Returns
+    -------
+    out : structured array
+        The output structured array.
+    """
+    cols = [cols] if isinstance(cols, str) else cols
+    if arr.ndim != 2 and arr.shape[1] != len(cols):
+        raise TypeError("`arr` must be a 2-dimensional array of "
+                        "shape `(n_samples, n_cols)`.")
+
+    dtype = {"names": cols, "formats": [arr.dtype] * len(cols)}
+    out = numpy.full(arr.shape[0], numpy.nan, dtype=dtype)
+    for i, col in enumerate(cols):
+        out[col] = arr[:, i]
+
+    return out
+
+
+def flip_cols(arr, col1, col2):
+    """
+    Flip values in columns `col1` and `col2`. `arr` is passed by reference and
+    is not explicitly returned back.
+
+    Parameters
+    ----------
+    arr : structured array
+        The array whose columns are to be converted.
+    col1 : str
+        The first column name.
+    col2 : str
+        The second column name.
+
+    Returns
+    -------
+    nothing
+    """
+    dum = numpy.copy(arr[col1])
+    arr[col1] = arr[col2]
+    arr[col2] = dum

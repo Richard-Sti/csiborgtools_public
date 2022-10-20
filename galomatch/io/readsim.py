@@ -30,9 +30,6 @@ F32 = numpy.float32
 F64 = numpy.float64
 I32 = numpy.int32
 I64 = numpy.int64
-little_h = 0.705
-BOXSIZE = 677.7 / little_h  # Mpc. Otherwise positions in [0, 1].
-BOXMASS = 3.749e19  # Msun
 
 
 def get_csiborg_ids(srcdir):
@@ -82,9 +79,60 @@ def get_sim_path(n, fname="ramses_out_{}", srcdir="/mnt/extraspace/hdesmond"):
     Returns
     -------
     path : str
-        The complete path to the `n`th CSiBORG simulation.
+        Path to the `n`th CSiBORG simulation.
     """
     return join(srcdir, fname.format(n))
+
+
+def get_snapshot_path(Nsnap, simpath):
+    """
+    Get a path to a CSiBORG IC realisation snapshot.
+
+    Parameters
+    ----------
+    Nsnap : int
+        Snapshot index.
+    simpath : str
+        Path to the CSiBORG IC realisation.
+
+    Returns
+    -------
+    snappath : str
+        Path to the CSiBORG IC realisation snapshot.
+    """
+    return join(simpath, "output_{}".format(str(Nsnap).zfill(5)))
+
+
+def read_info(Nsnap, simpath):
+    """
+    Read CSiBORG simulation snapshot info.
+
+    Parameters
+    ----------
+    Nsnap : int
+        Snapshot index.
+    simpath : str
+        Path to the CSiBORG IC realisation.
+
+    Returns
+    -------
+    info : dict
+        Dictionary of info paramaters. Note that both keys and values are
+        strings.
+    """
+    # Open the info file
+    snappath = get_snapshot_path(Nsnap, simpath)
+    filename = join(snappath, "info_{}.txt".format(str(Nsnap).zfill(5)))
+    with open(filename, "r") as f:
+        info = f.read().split()
+    # Throw anything below ordering line out
+    info = numpy.asarray(info[:info.index("ordering")])
+    # Get indexes of lines with `=`. Indxs before/after be keys/vals
+    eqindxs = numpy.asarray([i for i in range(info.size) if info[i] == '='])
+
+    keys = info[eqindxs - 1]
+    vals = info[eqindxs + 1]
+    return {key: val for key, val in zip(keys, vals)}
 
 
 def open_particle(n, simpath, verbose=True):
@@ -109,11 +157,9 @@ def open_particle(n, simpath, verbose=True):
     """
     # Zeros filled snapshot number and the snapshot path
     nout = str(n).zfill(5)
-    snappath = join(simpath, "output_{}".format(nout))
-    infopath = join(snappath, "info_{}.txt".format(nout))
+    snappath = get_snapshot_path(n, simpath)
+    ncpu = int(read_info(n, simpath)["ncpu"])
 
-    with open(infopath, "r") as f:
-        ncpu = int(f.readline().split()[-1])
     if verbose:
         print("Reading in output `{}` with ncpu = `{}`.".format(nout, ncpu))
 
@@ -136,6 +182,7 @@ def open_particle(n, simpath, verbose=True):
         # Read in this order
         ncpuloc = f.read_ints()
         if ncpuloc != ncpu:
+            infopath = join(snappath, "info_{}.txt".format(nout))
             raise ValueError("`ncpu = {}` of `{}` disagrees with `ncpu = {}` "
                              "of `{}`.".format(ncpu, infopath, ncpuloc, fpath))
         ndim = f.read_ints()
@@ -382,74 +429,3 @@ def read_mmain(n, srcdir, fname="Mmain_{}.npy"):
         out[name] = arr[:, i]
 
     return out
-
-
-def convert_mass_cols(arr, cols):
-    r"""
-    Convert mass columns from box units to :math:`M_{\odot}`. `arr` is passed
-    by reference and is not explicitly returned back.
-
-    Parameters
-    ----------
-    arr : structured array
-        The array whose columns are to be converted.
-    cols : str or list of str
-        The mass columns to be converted.
-
-    Returns
-    -------
-    None
-    """
-    cols = [cols] if isinstance(cols, str) else cols
-    for col in cols:
-        arr[col] *= BOXMASS
-
-
-def convert_position_cols(arr, cols, zero_centered=True):
-    r"""
-    Convert position columns from box units to :math:`\mathrm{Mpc}`. `arr` is
-    passed by reference and is not explicitly returned back.
-
-    Parameters
-    ----------
-    arr : structured array
-        The array whose columns are to be converted.
-    cols : str or list of str
-        The mass columns to be converted.
-    zero_centered : bool, optional
-        Whether to translate the well-resolved origin in the centre of the
-        simulation to the :math:`(0, 0 , 0)` point. By default `True`.
-
-    Returns
-    -------
-    None
-    """
-    cols = [cols] if isinstance(cols, str) else cols
-    for col in cols:
-        arr[col] *= BOXSIZE
-        if zero_centered:
-            arr[col] -= BOXSIZE / 2
-
-
-def flip_cols(arr, col1, col2):
-    """
-    Flip values in columns `col1` and `col2`. `arr` is passed by reference and
-    is not explicitly returned back.
-
-
-    Parameters
-    ----------
-    arr : structured array
-        The array whose columns are to be converted.
-    col1 : str
-        The first column name.
-    col2 : str
-        The second column name.
-
-    Returns
-    -------
-    nothing
-    """
-    dum = numpy.copy(arr[col1])
-    arr[col1] = arr[col2]
-    arr[col2] = dum
