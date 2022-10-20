@@ -12,6 +12,9 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+"""
+Scripts to read in observation.
+"""
 
 import numpy
 from astropy.io import fits
@@ -20,7 +23,7 @@ from ..utils import (add_columns, cols_to_structured)
 
 
 def read_planck2015(fpath, dist_cosmo, max_comdist=None):
-    """
+    r"""
     Read the Planck 2nd Sunyaev-Zeldovich source catalogue [1]. The following
     is performed:
         - removes clusters without a redshift estimate,
@@ -57,8 +60,8 @@ def read_planck2015(fpath, dist_cosmo, max_comdist=None):
     dist = dist_cosmo.comoving_distance(out["REDSHIFT"]).value
     out = add_columns(out, dist, "COMDIST")
     # Convert masses
-    for p in ("MSZ", "MSZ_ERR_UP", "MSZ_ERR_LOW"):
-        out[p] *= 1e14
+    for par in ("MSZ", "MSZ_ERR_UP", "MSZ_ERR_LOW"):
+        out[par] *= 1e14
     # Distance threshold
     if max_comdist is not None:
         out = out[out["COMDIST"] < max_comdist]
