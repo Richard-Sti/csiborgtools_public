@@ -122,8 +122,8 @@ def open_particle(n, simpath, verbose=True):
     unbinding_file = "unbinding_{}.out00001".format(nout)
     if unbinding_file not in snapdirlist:
         raise FileNotFoundError(
-            "Couldn't find `{}` in `{}`. Use mergertreeplot.py -h or --help to "
-            "print help message.".format(unbinding_file, snappath))
+            "Couldn't find `{}` in `{}`. Use mergertreeplot.py -h or --help "
+            "to print help message.".format(unbinding_file, snappath))
 
     # First read the headers. Reallocate arrays and fill them.
     nparts = numpy.zeros(ncpu, dtype=int)
@@ -147,6 +147,7 @@ def open_particle(n, simpath, verbose=True):
         nsink = f.read_ints()
 
         partfiles[cpu] = f
+        del ndim, localseed, nstar_tot, mstar_tot, mstar_lost, nsink
 
     return nparts, partfiles
 
@@ -181,7 +182,8 @@ def read_sp(dtype, partfile):
 
 def nparts_to_start_ind(nparts):
     """
-    Convert `nparts` array to starting indices in a pre-allocated array for looping over the CPU number.
+    Convert `nparts` array to starting indices in a pre-allocated array for
+    looping over the CPU number.
 
     Parameters
     ----------
@@ -258,7 +260,8 @@ def read_particle(pars_extract, n, simpath, verbose=True):
 
 def open_unbinding(cpu, n, simpath):
     """
-    Open particle files to a given CSiBORG simulation. Note that to be consistent CPU is incremented by 1.
+    Open particle files to a given CSiBORG simulation. Note that to be
+    consistent CPU is incremented by 1.
 
     Parameters
     ----------
@@ -381,11 +384,10 @@ def read_mmain(n, srcdir, fname="Mmain_{}.npy"):
     return out
 
 
-
 def convert_mass_cols(arr, cols):
-    """
-    Convert mass columns from box units to :math:`M_{odot}`. `arr` is passed by
-    reference and is not explicitly returned back.
+    r"""
+    Convert mass columns from box units to :math:`M_{\odot}`. `arr` is passed
+    by reference and is not explicitly returned back.
 
     Parameters
     ----------
@@ -404,7 +406,7 @@ def convert_mass_cols(arr, cols):
 
 
 def convert_position_cols(arr, cols, zero_centered=True):
-    """
+    r"""
     Convert position columns from box units to :math:`\mathrm{Mpc}`. `arr` is
     passed by reference and is not explicitly returned back.
 
