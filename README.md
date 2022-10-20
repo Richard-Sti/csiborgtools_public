@@ -1,1 +1,1 @@
-# Galaxy-to-halo matching
+# CSiBORG matching
