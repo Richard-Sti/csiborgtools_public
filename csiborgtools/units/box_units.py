@@ -24,7 +24,7 @@ from ..io import read_info
 
 # Conversion factors
 MSUNCGS = constants.M_sun.cgs.value
-KPC_TO_CM = 3.08567758149137e21
+KPC_TO_CM = 3.0856775814913673e+21
 PI = 3.1415926535897932384626433
 
 
@@ -62,7 +62,8 @@ class BoxUnits:
 
     def box2kpc(self, length):
         r"""
-        Convert length from box units to :math:`\mathrm{kpc}`.
+        Convert length from box units to :math:`\mathrm{kpc}` (with
+        :math:`h=0.705`).
 
         Parameters
         ----------
@@ -78,7 +79,8 @@ class BoxUnits:
 
     def kpc2box(self, length):
         r"""
-        Convert length from :math:`\mathrm{kpc}` to box units.
+        Convert length from :math:`\mathrm{kpc}` (with :math:`h=0.705`) to
+        box units.
 
         Parameters
         ----------
@@ -94,7 +96,7 @@ class BoxUnits:
 
     def solarmass2box(self, mass):
         r"""
-        Convert mass from :math:`M_\odot` to box units.
+        Convert mass from :math:`M_\odot` (with :math:`h=0.705`) to box units.
 
         Parameters
         ----------
@@ -106,15 +108,11 @@ class BoxUnits:
         mass : float
             Mass in box units.
         """
-        m = mass * MSUNCGS   # In cgs
-        unit_m = self.unit_d * self.unit_l ** 3
-        return m / unit_m
+        return mass / self.unit_d / (self.unit_l**3 / MSUNCGS)
 
     def box2solarmass(self, mass):
         r"""
-        Convert mass from box units to :math:`M_\odot`.
-
-        TODO: check this.
+        Convert mass from box units to :math:`M_\odot` (with :math:`h=0.705`).
 
         Parameters
         ----------
@@ -126,41 +124,38 @@ class BoxUnits:
         mass : float
             Mass in :math:`M_\odot`.
         """
-        unit_m = self.unit_d * self.unit_l**3
-        m = mass * unit_m  # In cgs
-        m = m / MSUNCGS
-        return m
+        return mass * self.unit_d * self.unit_l**3 / MSUNCGS
 
     def box2dens(self, density):
         r"""
-        Convert density from box units to :math:`M_\odot / \mathrm{pc}^3`.
-
-        TODO: check this.
+        Convert density from box units to :math:`M_\odot / \mathrm{pc}^3`
+        (with :math:`h=0.705`).
 
         Parameters
         ----------
         density : float
             Density in box units.
-        box : `BoxConstants`
-            Simulation box class with units.
 
         Returns
         -------
         density : float
             Density in :math:`M_\odot / \mathrm{pc}^3`.
         """
-        rho = density * self.unit_d  # In cgs
-        rho = rho * (KPC_TO_CM * 1e-3)**3  # In g/pc^3
-        rho = rho / MSUNCGS
-        return rho
+        return density * self.unit_d / MSUNCGS * (KPC_TO_CM * 1e-3)**3
 
     def dens2box(self, density):
         r"""
-        Convert density from M_sun / pc^3
+        Convert density from :math:`M_\odot / \mathrm{pc}^3`
+        (with :math:`h=0.705`) to box units.
 
-        TODO: check this and write documentation.
+        Parameters
+        ----------
+        density : float
+            Density in :math:`M_\odot / \mathrm{pc}^3`.
+
+        Returns
+        -------
+        density : float
+            Density in box units.
         """
-        rho = density * MSUNCGS
-        rho = rho / (KPC_TO_CM * 1e-3)**3  # In g/cm^3
-        rho = rho / self.unit_d
-        return rho
+        return density / self.unit_d * MSUNCGS / (KPC_TO_CM * 1e-3)**3
