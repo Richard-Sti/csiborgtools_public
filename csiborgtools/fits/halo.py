@@ -18,6 +18,7 @@ Tools for splitting the particles and a clump object.
 
 
 import numpy
+from scipy.optimize import minimize_scalar
 from os import remove
 from warnings import warn
 from os.path import join
@@ -235,7 +236,7 @@ def pick_single_clump(n, particles, particle_clumps, clumps):
 
 
 class Clump:
-    """
+    r"""
     A clump (halo) object to handle the particles and their clump's data.
 
     Parameters
@@ -254,28 +255,40 @@ class Clump:
         Clump center coordinate along the y-axis.
     z0 : float
         Clump center coordinate along the z-axis.
-    clump_mass : float
-        Mass of the clump.
-    vx : 1-dimensional array
-        Particle velocity along the x-axis.
-    vy : 1-dimensional array
-        Particle velocity along the y-axis.
-    vz : 1-dimensional array
-        Particle velocity along the z-axis.
+    clump_mass : float, optional
+        Mass of the clump. By default not set.
+    vx : 1-dimensional array, optional
+        Particle velocity along the x-axis. By default not set.
+    vy : 1-dimensional array, optional
+        Particle velocity along the y-axis. By default not set.
+    vz : 1-dimensional array, optional
+        Particle velocity along the z-axis. By default not set.
+    index : int, optional
+        The halo finder index of this clump. By default not set.
+    rhoc : float, optional
+        The critical density :math:`\rho_c` at this snapshot in box units. By
+        default not set.
     """
     _r = None
+    _rmin = None
+    _rmax = None
     _pos = None
     _clump_pos = None
     _clump_mass = None
     _vel = None
+    _Npart = None
+    _index = None
+    _rhoc = None
 
     def __init__(self, x, y, z, m, x0, y0, z0, clump_mass=None,
-                 vx=None, vy=None, vz=None):
+                 vx=None, vy=None, vz=None, index=None, rhoc=None):
         self.pos = (x, y, z, x0, y0, z0)
         self.clump_pos = (x0, y0, z0)
         self.clump_mass = clump_mass
         self.vel = (vx, vy, vz)
         self.m = m
+        self.index = index
+        self.rhoc = rhoc
 
     @property
     def pos(self):
@@ -294,7 +307,46 @@ class Clump:
         """Sets `pos` and calculates radial distance."""
         x, y, z, x0, y0, z0 = X
         self._pos = numpy.vstack([x - x0, y - y0, z - z0]).T
-        self.r = numpy.sum(self.pos**2, axis=1)**0.5
+        self._r = numpy.sum(self.pos**2, axis=1)**0.5
+        self._rmin = numpy.min(self._r)
+        self._rmax = numpy.max(self._r)
+        self._Npart = self._r.size
+
+    @property
+    def r(self):
+        """
+        Radial distance of the particles from the clump peak.
+
+        Returns
+        -------
+        r : 1-dimensional array
+            Array of shape `(n_particles, )`.
+        """
+        return self._r
+
+    @property
+    def rmin(self):
+        """
+        The minimum radial distance of a particle.
+
+        Returns
+        -------
+        rmin : float
+            The minimum distance.
+        """
+        return self._rmin
+
+    @property
+    def rmax(self):
+        """
+        The maximum radial distance of a particle.
+
+        Returns
+        -------
+        rmin : float
+            The maximum distance.
+        """
+        return self._rmax
 
     @property
     def Npart(self):
@@ -306,7 +358,7 @@ class Clump:
         Npart : int
             Number of particles.
         """
-        return self.r.size
+        return self._Npart
 
     @property
     def clump_pos(self):
@@ -338,12 +390,14 @@ class Clump:
         mass : float
             Clump mass.
         """
+        if self._clump_mass is None:
+            raise ValueError("Clump mass `clump_mass` has not been set.")
         return self._clump_mass
 
     @clump_mass.setter
     def clump_mass(self, mass):
         """Sets `clump_mass`, making sure it is a float."""
-        if not isinstance(mass, float):
+        if mass is not None and not isinstance(mass, float):
             raise ValueError("`clump_mass` must be a float.")
         self._clump_mass = mass
 
@@ -391,25 +445,46 @@ class Clump:
         self._m = m
 
     @property
-    def r(self):
+    def index(self):
         """
-        Radial distance of particles from the clump peak.
+        The halo finder clump index.
 
         Returns
         -------
-        r : 1-dimensional array
-            Array of shape `(n_particles, )`
+        hindex : int
+            The index.
         """
-        return self._r
+        if self._index is None:
+            raise ValueError("Halo index `hindex` has not been set.")
+        return self._index
 
-    @r.setter
-    def r(self, r):
-        """Sets `r`. Again checks the shape."""
-        if not isinstance(r, numpy.ndarray) and r.ndim == 1:
-            raise TypeError("`r` must be a 1-dimensional array.")
-        if not numpy.all(r >= 0):
-            raise ValueError("`r` larger than zero.")
-        self._r = r
+    @index.setter
+    def index(self, n):
+        """Sets the halo index, making sure it is an integer."""
+        if n is not None and not (isinstance(n, (int, numpy.int64)) and n > 0):
+            raise ValueError("Halo index `index` must be an integer > 0.")
+        self._index = n
+
+    @property
+    def rhoc(self):
+        """
+        The critical density :math:`\rho_c` at this snapshot in box units.
+
+        Returns
+        -------
+        rhoc : float
+            The critical density.
+        """
+        if self._rhoc is None:
+            raise ValueError("The critical density `rhoc` has not been set.")
+        return self._rhoc
+
+    @rhoc.setter
+    def rhoc(self, rhoc):
+        """Sets the critical density. Makes sure it is > 0."""
+        if rhoc is not None and not rhoc > 0:
+            raise ValueError("Critical density `rho_c` must be > 0.")
+        self._rhoc = rhoc
 
     @property
     def total_particle_mass(self):
@@ -435,8 +510,165 @@ class Clump:
         """
         return numpy.mean(self.pos + self.clump_pos, axis=0)
 
+    def enclosed_spherical_mass(self, rmax, rmin=None):
+        """
+        The enclosed spherical mass between two radii. All quantities remain
+        in the box units.
+
+        Parameters
+        ----------
+        rmax : float
+            The maximum radial distance.
+        rmin : float, optional
+            The minimum radial distance. By default the radial distance of the
+            closest particle.
+
+        Returns
+        -------
+        M_enclosed : float
+            The enclosed mass.
+        """
+        rmin = self.rmin if rmin is None else rmin
+        return numpy.sum(self.m[(self.r >= rmin) & (self.r <= rmax)])
+
+    def enclosed_spherical_density(self, rmax, rmin=None):
+        """
+        The enclosed spherical density between two radii. All quantities
+        remain in box units.
+
+        Parameters
+        ----------
+        rmax : float
+            The maximum radial distance.
+        rmin : float, optional
+            The minimum radial distance. By default the radial distance of the
+            closest particle.
+
+        Returns
+        -------
+        rho_enclosed : float
+            The enclosed density.
+        """
+        rmin = self.rmin if rmin is None else rmin
+        M = self.enclosed_spherical_mass(rmax, rmin)
+        V = 4 * numpy.pi / 3 * (rmax**3 - rmin**3)
+        return M / V
+
+    def radius_enclosed_overdensity(self, delta):
+        r"""
+        Radius of where the mean enclosed spherical density reaches a multiple
+        of the critical radius at a given redshift `self.rho_c`. Returns
+        `numpy.nan` if the fit does not converge. Note that `rhoc` must be in
+        box units!
+
+        Parameters
+        ----------
+        delta : int or float
+            The :math:`\delta_{\rm x}` parameters where :math:`\mathrm{x}` is
+            the overdensity multiple.
+
+        Returns
+        -------
+        rx : float
+            The radius where the enclosed density reaches required value.
+        """
+        # Loss function to minimise
+        def loss(r):
+            return abs(self.enclosed_spherical_density(r, self.rmin)
+                       - delta * self.rhoc)
+
+        res = minimize_scalar(loss, bounds=(self.rmin, self.rmax),
+                              method='bounded')
+        return res.x if res.success else numpy.nan
+
+    @property
+    def r200(self):
+        r"""
+        The radius at which the mean spherical density reaches 200 times
+        the critical density, :math:`R_{200c}`. Returns `numpy.nan` if the
+        estimate fails.
+
+        Returns
+        -------
+        r200 : float
+            The R200c radius
+        """
+        return self.radius_enclosed_overdensity(200)
+
+    @property
+    def r178(self):
+        r"""
+        The radius at which the mean spherical density reaches 178 times
+        the critical density, :math:`R_{178c}`. Returns `numpy.nan` if the
+        estimate fails.
+
+        Returns
+        -------
+        r178 : float
+            The R178c radius
+        """
+        return self.radius_enclosed_overdensity(178)
+
+    @property
+    def r500(self):
+        r"""
+        The radius at which the mean spherical density reaches 500 times
+        the critical density, :math:`R_{500c}`. Returns `numpy.nan` if the
+        estimate fails.
+
+        Returns
+        -------
+        r500 : float
+            The R500c radius
+        """
+        return self.radius_enclosed_overdensity(500)
+
+    @property
+    def m200(self):
+        r"""
+        The mass enclosed within the :math:`R_{200c}` region, obtained from
+        `self.r200`. Returns `numpy.nan` if the radius estimate fails.
+
+        Returns
+        -------
+        m200 : float
+            The M200 mass
+        """
+        r200 = self.radius_enclosed_overdensity(200)
+        return self.enclosed_spherical_mass(r200)
+
+    @property
+    def m178(self):
+        r"""
+        The mass enclosed within the :math:`R_{178c}` region, obtained from
+        `self.r178`. This is approximately the virial mass, though this notion
+        depends on the dynamical state of the clump. Returns `numpy.nan` if
+        the radius estimate fails.
+
+        Returns
+        -------
+        m178 : float
+            The M178 mass
+        """
+        r178 = self.radius_enclosed_overdensity(178)
+        return self.enclosed_spherical_mass(r178)
+
+    @property
+    def m500(self):
+        r"""
+        The mass enclosed within the :math:`R_{500c}` region, obtained from
+        `self.r500`. Returns `numpy.nan` if the radius estimate fails.
+
+        Returns
+        -------
+        m500 : float
+            The M500 mass
+        """
+        r500 = self.radius_enclosed_overdensity(500)
+        return self.enclosed_spherical_mass(r500)
+
     @classmethod
-    def from_arrays(cls, particles, clump):
+    def from_arrays(cls, particles, clump, rhoc=None):
         """
         Initialises `Halo` from `particles` containing the relevant particle
         information and its `clump` information.
@@ -452,14 +684,15 @@ class Clump:
 
         Returns
         -------
-        halo : `Halo`
-            An initialised halo object.
+        clump : `Clump`
+            An initialised clump object.
         """
         x, y, z, m = (particles[p] for p in ["x", "y", "z", "M"])
-        x0, y0, z0, cl_mass = (
-            clump[p] for p in ["peak_x", "peak_y", "peak_z", "mass_cl"])
+        x0, y0, z0, cl_mass, hindex = (
+            clump[p] for p in ["peak_x", "peak_y", "peak_z", "mass_cl",
+                               "index"])
         try:
             vx, vy, vz = (particles[p] for p in ["vx", "vy", "vz"])
         except ValueError:
             vx, vy, vz = None, None, None
-        return cls(x, y, z, m, x0, y0, z0, cl_mass, vx, vy, vz)
+        return cls(x, y, z, m, x0, y0, z0, cl_mass, vx, vy, vz, hindex, rhoc)
