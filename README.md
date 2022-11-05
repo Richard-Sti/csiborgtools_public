@@ -1,11 +1,12 @@
 # CSiBORG tools
 
 ## :scroll: Short-term TODO
-- [x] Calculate $M_{\rm vir}, R_{\rm vir}, c$ from $R_s, \rho_0, \ldots$
-- [x] In `NFWPosterior` correct for the radius in which particles are fitted.
-- [x] Calculate $M_{\rm 500c}$ by sphere shrinking
-- [x] Change to log10 of the scale factor
-- [ ] Calculate uncertainty on $R_{\rm s}$, switch to `JAX` and get gradients.
+- [ ] Calculate mass functions
+- [ ] Add functions for converting the output file to box units.
+- [ ] Calculate catalogues for all realisations.
+- [x] Verify the bulk flow of particles and the clump
+- [x] Check why for some halos $M_{500c} > M_{200c}$
+
 
 
 ## :hourglass: Long-term TODO
@@ -14,3 +15,4 @@
 
 
 ## :bulb: Open questions
+- Propagate uncertainty of $\log R_{\rm s}$ to concentration
