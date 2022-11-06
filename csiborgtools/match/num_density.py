@@ -51,7 +51,7 @@ def binned_counts(x, bins):
     return centres, out
 
 
-def number_density(data, feat, bins, max_dist, to_log10):
+def number_density(data, feat, bins, max_dist, to_log10, return_counts=False):
     """
     Calculate volume-limited number density of a feature `feat` from array
     `data`, normalised also by the bin width.
@@ -70,6 +70,9 @@ def number_density(data, feat, bins, max_dist, to_log10):
     to_log10 : bool
         Whether to take a logarithm of base 10 of the feature. If so, then the
         bins must also be logarithmic.
+    return_counts : bool, optional
+        Whether to also return number counts in each bin. By default `False`.
+
 
     Returns
     -------
@@ -80,6 +83,9 @@ def number_density(data, feat, bins, max_dist, to_log10):
         Number density of shape `(n_edges - 1, )`.
     nd_err : 1-dimensional array
         Poissonian uncertainty of `nd` of shape `(n_edges - 1, )`.
+    counts: 1-dimensional array, optional
+        Counts in each bin of shape `(n_edges - 1, )`. Returned only if
+        `return_counts`.
     """
     # Extract the param and optionally convert to log10
     x = data[feat]
@@ -104,4 +110,8 @@ def number_density(data, feat, bins, max_dist, to_log10):
     # Convert bins to linear space if log10
     if to_log10:
         bin_centres = 10**bin_centres
-    return bin_centres, nd, nd_err
+
+    out = (bin_centres, nd, nd_err)
+    if return_counts:
+        out += counts
+    return out
