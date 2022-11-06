@@ -1,8 +1,8 @@
 # CSiBORG tools
 
 ## :scroll: Short-term TODO
-- [ ] Calculate mass functions
-- [ ] Add functions for converting the output file to box units.
+- [x] Calculate mass functions
+- [x] Add functions for converting the output file to box units.
 - [ ] Calculate catalogues for all realisations.
 - [x] Verify the bulk flow of particles and the clump
 - [x] Check why for some halos $M_{500c} > M_{200c}$
