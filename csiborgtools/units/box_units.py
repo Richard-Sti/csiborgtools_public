@@ -234,7 +234,7 @@ class BoxUnits:
 
     def box2dens(self, density):
         r"""
-        Convert density from box units to :math:`M_\odot / \mathrm{pc}^3`
+        Convert density from box units to :math:`M_\odot / \mathrm{Mpc}^3`
         (with :math:`h=0.705`).
 
         Parameters
@@ -248,11 +248,11 @@ class BoxUnits:
             Density in :math:`M_\odot / \mathrm{pc}^3`.
         """
         return (density * self._unit_d / self._Msuncgs
-                * (units.pc.to(units.cm))**3)
+                * (units.Mpc.to(units.cm))**3)
 
     def dens2box(self, density):
         r"""
-        Convert density from :math:`M_\odot / \mathrm{pc}^3`
+        Convert density from :math:`M_\odot / \mathrm{Mpc}^3`
         (with :math:`h=0.705`) to box units.
 
         Parameters
@@ -266,16 +266,16 @@ class BoxUnits:
             Density in box units.
         """
         return (density / self._unit_d * self._Msuncgs
-                / (units.pc.to(units.cm))**3)
+                / (units.Mpc.to(units.cm))**3)
 
 
 def convert_from_boxunits(data, names, boxunits):
     r"""
     Convert columns named `names` in array `data` from box units to physical
     units, such that
-        - length -> Mpc,
-        - mass -> solar mass,
-        - density -> solar mass per cubed kpc.
+        - length -> :math:`Mpc`,
+        - mass -> :math:`M_\odot`,
+        - density -> :math:`M_\odot / \mathrm{Mpc}^3`.
     Any other conversions are currently not implemented. Note that the array
     is passed by reference and directly modified, even though it is also
     explicitly returned. Additionally centres the box coordinates on the
