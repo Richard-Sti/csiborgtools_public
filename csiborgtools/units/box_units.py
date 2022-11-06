@@ -278,7 +278,8 @@ def convert_from_boxunits(data, names, boxunits):
         - density -> solar mass per cubed kpc.
     Any other conversions are currently not implemented. Note that the array
     is passed by reference and directly modified, even though it is also
-    explicitly returned.
+    explicitly returned. Additionally centres the box coordinates on the
+    observer, if they are being transformed.
 
     Parameters
     ----------
@@ -288,7 +289,7 @@ def convert_from_boxunits(data, names, boxunits):
         Columns to be converted.
     boxunits : `BoxUnits`
         Box units class of the simulation and snapshot.
-    
+
     Returns
     -------
     data : structured array
@@ -322,5 +323,9 @@ def convert_from_boxunits(data, names, boxunits):
         if not found:
             raise NotImplementedError(
                 "Conversion of `{}` is not defined.".format(name))
+
+        # Center at the observer
+        if name in ["peak_x", "peak_y", "peak_z"]:
+            data[name] -= transforms["length"](0.5)
 
     return data
