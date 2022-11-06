@@ -21,6 +21,14 @@ from astropy.cosmology import LambdaCDM
 from astropy import (constants, units)
 from ..io import read_info
 
+# Map of unit conversions
+CONV_NAME = {
+    "length": ["peak_x", "peak_y", "peak_z", "Rs", "rmin", "rmax", "r200",
+               "r500"],
+    "mass": ["mass_cl", "totpartmass", "m200", "m500", "mass_mmain"],
+    "density": ["rho0"]
+    }
+
 
 class BoxUnits:
     r"""
@@ -173,6 +181,23 @@ class BoxUnits:
         """
         return length / (self._unit_l / units.kpc.to(units.cm) / self._aexp)
 
+    def box2mpc(self, length):
+        r"""
+        Convert length from box units to :math:`\mathrm{cMpc}` (with
+        :math:`h=0.705`).
+
+        Parameters
+        ----------
+        length : float
+            Length in box units.
+
+        Returns
+        -------
+        length : foat
+            Length in :math:`\mathrm{ckpc}`
+        """
+        return self.box2kpc(length) * 1e-3
+
     def solarmass2box(self, mass):
         r"""
         Convert mass from :math:`M_\odot` (with :math:`h=0.705`) to box units.
@@ -242,3 +267,60 @@ class BoxUnits:
         """
         return (density / self._unit_d * self._Msuncgs
                 / (units.pc.to(units.cm))**3)
+
+
+def convert_from_boxunits(data, names, boxunits):
+    r"""
+    Convert columns named `names` in array `data` from box units to physical
+    units, such that
+        - length -> Mpc,
+        - mass -> solar mass,
+        - density -> solar mass per cubed kpc.
+    Any other conversions are currently not implemented. Note that the array
+    is passed by reference and directly modified, even though it is also
+    explicitly returned.
+
+    Parameters
+    ----------
+    data : structured array
+        Input array.
+    names : list of str
+        Columns to be converted.
+    boxunits : `BoxUnits`
+        Box units class of the simulation and snapshot.
+    
+    Returns
+    -------
+    data : structured array
+        Input array with converted columns.
+    """
+    if not isinstance(boxunits, BoxUnits):
+        raise TypeError("`boxunits` must be of type `{}`. Currently `{}`."
+                        .format(BoxUnits, type(boxunits)))
+    names = [names] if isinstance(names, str) else names
+
+    # Shortcut for the transform functions
+    transforms = {
+        "length": boxunits.box2mpc,
+        "mass": boxunits.box2solarmass,
+        "density": boxunits.box2dens
+        }
+
+    for name in names:
+        # Check that the name is even in the array
+        if name not in data.dtype.names:
+            raise ValueError("Name `{}` is not in `data` array.".format(name))
+
+        # Convert
+        found = False
+        for unittype, suppnames in CONV_NAME.items():
+            if name in suppnames:
+                data[name] = transforms[unittype](data[name])
+                found = True
+                continue
+        # If nothing found
+        if not found:
+            raise NotImplementedError(
+                "Conversion of `{}` is not defined.".format(name))
+
+    return data
