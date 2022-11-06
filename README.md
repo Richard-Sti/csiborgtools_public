@@ -1,18 +1,15 @@
 # CSiBORG tools
 
 ## :scroll: Short-term TODO
-- [x] Calculate mass functions
-- [x] Add functions for converting the output file to box units.
+- [ ] Compare empirical $M_{500c}$ to the NFW expectation.
 - [ ] Calculate catalogues for all realisations.
-- [x] Verify the bulk flow of particles and the clump
-- [x] Check why for some halos $M_{500c} > M_{200c}$
-
 
 
 ## :hourglass: Long-term TODO
-- [ ] Improve file naming system
+- [ ] Calculate the halo spin
+- [ ] Model the Planck SZ selection function.
 - [ ] Calculate the cross-correlation in CSiBORG. Should see the scale of the constraints?
+- [ ] Improve file naming system
 
 
 ## :bulb: Open questions
-- Propagate uncertainty of $\log R_{\rm s}$ to concentration
