@@ -16,4 +16,3 @@
 from .transforms import (cartesian_to_radec, convert_mass_cols,  # noqa
                          convert_position_cols)  # noqa
 from .box_units import (BoxUnits, convert_from_boxunits)  # noqa
-
