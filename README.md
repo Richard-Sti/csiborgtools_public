@@ -1,17 +1,15 @@
 # CSiBORG tools
 
 ## :scroll: Short-term TODO
-- [ ] Make a nice plot comparing the SZ clusters and their number density
-- [x] Compare empirical $M_{500c}$ to the NFW expectation.
+- [ ] Add half-mass radius and its corresponding concentration.
+- [ ] Model the Planck SZ selection function.
 - [ ] Calculate catalogues for all realisations.
-- [x] Add shortcut function for loading a catalogue
 
 
 ## :hourglass: Long-term TODO
-- [ ] Calculate the halo spin
-- [ ] Model the Planck SZ selection function.
+- [ ] Calculate the halo spin.
 - [ ] Calculate the cross-correlation in CSiBORG. Should see the scale of the constraints?
-- [ ] Improve file naming system
+- [ ] Calculate DM environmental properties.
 
 
 ## :bulb: Open questions

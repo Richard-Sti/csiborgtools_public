@@ -19,7 +19,6 @@ Notebook utility functions.
 
 import numpy
 from os.path import join
-from tqdm import trange
 from astropy.cosmology import FlatLambdaCDM
 
 try:
@@ -33,40 +32,6 @@ Nsplits = 200
 dumpdir = "/mnt/extraspace/rstiskalek/csiborg/"
 
 
-def load_mmain_convert(n):
-    srcdir = "/users/hdesmond/Mmain"
-    arr = csiborgtools.io.read_mmain(n, srcdir)
-
-    csiborgtools.utils.convert_mass_cols(arr, "mass_cl")
-    csiborgtools.utils.convert_position_cols(
-        arr, ["peak_x", "peak_y", "peak_z"])
-    csiborgtools.utils.flip_cols(arr, "peak_x", "peak_z")
-
-    d, ra, dec = csiborgtools.utils.cartesian_to_radec(arr)
-    arr = csiborgtools.utils.add_columns(
-        arr, [d, ra, dec], ["dist", "ra", "dec"])
-    return arr
-
-
-def load_mmains(N=None, verbose=True):
-    ids = csiborgtools.io.get_csiborg_ids("/mnt/extraspace/hdesmond")
-    N = ids.size if N is None else N
-    if N > ids.size:
-        raise ValueError("`N` cannot be larger than 101.")
-    # If N less than num of CSiBORG, then radomly choose
-    if N == ids.size:
-        choices = numpy.arange(N)
-    else:
-        choices = numpy.random.choice(ids.size, N, replace=False)
-
-    out = [None] * N
-    iters = trange(N) if verbose else range(N)
-    for i in iters:
-        j = choices[i]
-        out[i] = load_mmain_convert(ids[j])
-    return out
-
-
 def load_processed(Nsim, Nsnap):
     simpath = csiborgtools.io.get_sim_path(Nsim)
     outfname = join(
@@ -76,6 +41,7 @@ def load_processed(Nsim, Nsnap):
     # Add mmain
     mmain = csiborgtools.io.read_mmain(Nsim, "/mnt/zfsusers/hdesmond/Mmain")
     data = csiborgtools.io.merge_mmain_to_clumps(data, mmain)
+    csiborgtools.utils.flip_cols(data, "peak_x", "peak_z")
     # Cut on numbre of particles and finite m200
     data = data[(data["npart"] > 100) & numpy.isfinite(data["m200"])]
 
@@ -85,6 +51,10 @@ def load_processed(Nsim, Nsnap):
                     "r200", "r500", "Rs", "rho0", "peak_x", "peak_y", "peak_z"]
     data = csiborgtools.units.convert_from_boxunits(
         data, convert_cols, boxunits)
+    # Now calculate spherical coordinates
+    d, ra, dec = csiborgtools.units.cartesian_to_radec(data)
+    data = csiborgtools.utils.add_columns(
+        data, [d, ra, dec], ["dist", "ra", "dec"])
     return data
 
 
