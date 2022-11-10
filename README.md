@@ -1,9 +1,10 @@
 # CSiBORG tools
 
 ## :scroll: Short-term TODO
-- [ ] Add half-mass radius and its corresponding concentration.
-- [ ] Model the Planck SZ selection function.
+- [x] Add the X-ray clusters
+- [x] Match the X-ray clusters to Planck
 - [ ] Calculate catalogues for all realisations.
+- [ ] Implement Max's halo matching
 
 
 ## :hourglass: Long-term TODO
@@ -13,3 +14,4 @@
 
 
 ## :bulb: Open questions
+- Completeness of clusters. Optical clusters catalogues are a bit of a mess..
