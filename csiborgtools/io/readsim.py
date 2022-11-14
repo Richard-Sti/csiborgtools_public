@@ -106,6 +106,23 @@ def get_snapshots(simpath):
     return numpy.sort(snaps)
 
 
+def get_maximum_snapshot(simpath):
+    """
+    Return the maximum snapshot of an IC realisation stored at `simpath`.
+
+    Parameters
+    ----------
+    simpath : str
+        Path to the CSiBORG IC realisation.
+
+    Returns
+    -------
+    maxsnap : float
+        The maximum snapshot.
+    """
+    return max(get_snapshots(simpath))
+
+
 def get_snapshot_path(Nsnap, simpath):
     """
     Get a path to a CSiBORG IC realisation snapshot.
