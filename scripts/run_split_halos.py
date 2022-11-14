@@ -14,7 +14,8 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """
 Script to split particles into smaller files according to their clump
-membership for faster manipulation. Running this will require a lot of memory.
+membership for faster manipulation. Currently does this for the maximum
+snapshot of each simulation. Running this will require a lot of memory.
 """
 
 from os.path import join
@@ -33,17 +34,17 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 nproc = comm.Get_size()
 
-# Nsims = [9844]
 Nsims = csiborgtools.io.get_csiborg_ids("/mnt/extraspace/hdesmond")
-Nsnap = 1016
 partcols = ["x", "y", "z", "vx", "vy", "vz", "M", "level"]
 dumpdir = join(utils.dumpdir, "temp")
 
 jobs = csiborgtools.fits.split_jobs(len(Nsims), nproc)[rank]
-for icount, Nsim in enumerate(jobs):
+for icount, sim_index in enumerate(jobs):
     print("{}: rank {} working {} / {} jobs.".format(datetime.now(), rank,
                                                      icount + 1, len(jobs)))
+    Nsim = Nsims[sim_index]
     simpath = csiborgtools.io.get_sim_path(Nsim)
+    Nsnap = csiborgtools.io.get_maximum_snapshot(simpath)
     # Load the clumps, particles' clump IDs and particles.
     clumps = csiborgtools.io.read_clumps(Nsnap, simpath)
     particle_clumps = csiborgtools.io.read_clumpid(Nsnap, simpath,
