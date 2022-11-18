@@ -17,9 +17,10 @@ Simulation box unit transformations.
 """
 
 import numpy
-from astropy.cosmology import LambdaCDM
+from astropy.cosmology import (LambdaCDM, z_at_value)
 from astropy import (constants, units)
 from ..io import read_info
+
 
 # Map of unit conversions
 CONV_NAME = {
@@ -197,6 +198,23 @@ class BoxUnits:
             Length in :math:`\mathrm{ckpc}`
         """
         return self.box2kpc(length) * 1e-3
+
+    def box2cosmoredshift(self, length):
+        r"""
+        Convert the box comoving distance to cosmological redshift.
+
+        Parameters
+        ----------
+        length : float
+            Length in box units.
+
+        Returns
+        -------
+        cosmo_redshift : foat
+            The cosmological redshift.
+        """
+        dist = self.box2mpc(length) * units.Mpc
+        return z_at_value(self._cosmo.comoving_distance, dist)
 
     def solarmass2box(self, mass):
         r"""
