@@ -199,6 +199,22 @@ class BoxUnits:
         """
         return self.box2kpc(length) * 1e-3
 
+    def box2vel(self, vel):
+        r"""
+        Convert velocity from box units to :math:`\mathrm{m} / \mathrm{s}^2`.
+
+        Parameters
+        ----------
+        vel : float
+            Velocity in box units.
+
+        Returns
+        -------
+        vel : float
+            Velocity in :math:`\mathrm{m} / \mathrm{s}^2`
+        """
+        return vel * (1e-2 * self._unit_l / self._unit_t / self.aexp)
+
     def box2cosmoredshift(self, length):
         r"""
         Convert the box comoving distance to cosmological redshift.
