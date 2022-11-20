@@ -17,7 +17,8 @@ Simulation box unit transformations.
 """
 
 import numpy
-from astropy.cosmology import (LambdaCDM, z_at_value)
+from scipy.interpolate import interp1d
+from astropy.cosmology import LambdaCDM
 from astropy import (constants, units)
 from ..io import read_info
 
@@ -213,24 +214,50 @@ class BoxUnits:
         vel : float
             Velocity in :math:`\mathrm{m} / \mathrm{s}^2`
         """
-        return vel * (1e-2 * self._unit_l / self._unit_t / self.aexp)
+        return vel * (1e-2 * self._unit_l / self._unit_t / self._aexp)
 
-    def box2cosmoredshift(self, length):
+    def box2cosmoredshift(self, dist):
         r"""
         Convert the box comoving distance to cosmological redshift.
 
         Parameters
         ----------
-        length : float
-            Length in box units.
+        dist : float
+            Dist in box units.
 
         Returns
         -------
         cosmo_redshift : foat
             The cosmological redshift.
         """
-        dist = self.box2mpc(length) * units.Mpc
-        return z_at_value(self._cosmo.comoving_distance, dist)
+        x = numpy.linspace(0., 1., 5001)
+        y = self.cosmo.comoving_distance(x)
+        return interp1d(y, x)(self.box2mpc(dist))
+
+    def box2pecredshift(self, vx, vy, vz, px, py, pz, p0x=0, p0y=0, p0z=0):
+        """
+        TODO: docs
+
+        """
+        # Peculiar velocity along the radial distance
+        r = numpy.vstack([px - p0x, py - p0y, pz - p0z]).T
+        norm = numpy.sum(r**2, axis=1)**0.5
+        v = numpy.vstack([vx, vy, vz]).T
+        vpec = numpy.sum(r * v, axis=1) / norm
+        # Ratio between the peculiar velocity and speed of light
+        x = self.box2vel(vpec) / constants.c.value
+        # Doppler shift
+        return numpy.sqrt((1 + x) / (1 - x)) - 1
+
+    def box2obsredshift(self, vx, vy, vz, px, py, pz, p0x=0, p0y=0, p0z=0):
+        """
+        TODO: docs
+
+        """
+        r = numpy.vstack([px - p0x, py - p0y, pz - p0z]).T
+        zcosmo = self.box2cosmoredshift(numpy.sum(r**2, axis=1)**0.5)
+        zpec = self.box2pecredshift(vx, vy, vz, px, py, pz, p0x, p0y, p0z)
+        return (1 + zpec) * (1 + zcosmo) - 1
 
     def solarmass2box(self, mass):
         r"""
@@ -361,5 +388,6 @@ def convert_from_boxunits(data, names, boxunits):
         # Center at the observer
         if name in ["peak_x", "peak_y", "peak_z"]:
             data[name] -= transforms["length"](0.5)
+            data[name] -= (0.5)
 
     return data
