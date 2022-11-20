@@ -67,7 +67,7 @@ def load_processed(Nsim, Nsnap):
     d, ra, dec = csiborgtools.units.cartesian_to_radec(data)
     data = csiborgtools.utils.add_columns(
         data, [d, ra, dec], ["dist", "ra", "dec"])
-    return data
+    return data, boxunits
 
 
 def load_planck2015(max_comdist=214):
