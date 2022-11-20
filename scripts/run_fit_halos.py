@@ -45,6 +45,7 @@ nproc = comm.Get_size()
 dumpdir = utils.dumpdir
 loaddir = join(utils.dumpdir, "temp")
 cols_collect = [("npart", I64), ("totpartmass", F64), ("Rs", F64),
+                ("vx", F64), ("vy", F64), ("vz", F64),
                 ("rho0", F64), ("conc", F64), ("rmin", F64),
                 ("rmax", F64), ("r200", F64), ("r500", F64),
                 ("m200", F64), ("m500", F64)]
@@ -64,6 +65,7 @@ for icount, Nsplit in enumerate(jobs):
     N = clumps.size
     cols = [("index", I64), ("npart", I64), ("totpartmass", F64),
             ("Rs", F64), ("rho0", F64), ("conc", F64),
+            ("vx", F64), ("vy", F64), ("vz", F64),
             ("rmin", F64), ("rmax", F64),
             ("r200", F64), ("r500", F64), ("m200", F64), ("m500", F64)]
     out = csiborgtools.utils.cols_to_structured(N, cols)
@@ -77,6 +79,9 @@ for icount, Nsplit in enumerate(jobs):
         out["rmin"][n] = clump.rmin
         out["rmax"][n] = clump.rmax
         out["totpartmass"][n] = clump.total_particle_mass
+        out["vx"] = numpy.average(clump.vel[:, 0], weights=clump.m)
+        out["vy"] = numpy.average(clump.vel[:, 1], weights=clump.m)
+        out["vz"] = numpy.average(clump.vel[:, 2], weights=clump.m)
 
         # Spherical overdensity radii and masses
         rs, ms = clump.spherical_overdensity_mass([200, 500])
