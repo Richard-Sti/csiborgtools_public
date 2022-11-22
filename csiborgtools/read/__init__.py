@@ -17,7 +17,7 @@ from .readsim import (get_csiborg_ids, get_sim_path, get_snapshots,  # noqa
                       get_snapshot_path, get_maximum_snapshot, read_info, nparts_to_start_ind,  # noqa
                       open_particle, open_unbinding, read_particle,  # noqa
                       drop_zero_indx,  # noqa
-                      read_clumpid, read_clumps, read_mmain,  # noqa
-                      merge_mmain_to_clumps)  # noqa
-from .readobs import (read_planck2015, read_mcxc, read_2mpp, read_2mpp_groups, match_planck_to_mcxc)  # noqa
+                      read_clumpid, read_clumps, read_mmain)  # noqa
+from .make_cat import (HaloCatalogue, CombinedHaloCatalogue)  # noqa
+from .readobs import (PlanckClusters, MCXCClusters, TwoMPPGalaxies, TwoMPPGroups)  # noqa
 from .outsim import (dump_split, combine_splits)  # noqa
