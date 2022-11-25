@@ -45,7 +45,7 @@ cols_collect = [("npart", I64), ("totpartmass", F64), ("Rs", F64),
                 ("vx", F64), ("vy", F64), ("vz", F64),
                 ("rho0", F64), ("conc", F64), ("rmin", F64),
                 ("rmax", F64), ("r200", F64), ("r500", F64),
-                ("m200", F64), ("m500", F64), ("lambda200c", F64)]
+                ("m200", F64), ("m500", F64)]
 paths = csiborgtools.read.CSiBORGPaths()
 
 for i, n_sim in enumerate(paths.ic_ids):
@@ -64,7 +64,7 @@ for i, n_sim in enumerate(paths.ic_ids):
 
         N = clumps.size
         cols = [("index", I64), ("npart", I64), ("totpartmass", F64),
-                ("Rs", F64), ("rho0", F64), ("conc", F64),
+                ("Rs", F64), ("rho0", F64), ("conc", F64), ("lambda200c", F64),
                 ("vx", F64), ("vy", F64), ("vz", F64),
                 ("rmin", F64), ("rmax", F64),
                 ("r200", F64), ("r500", F64), ("m200", F64), ("m500", F64)]
