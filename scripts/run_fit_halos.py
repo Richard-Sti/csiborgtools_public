@@ -45,7 +45,7 @@ cols_collect = [("npart", I64), ("totpartmass", F64), ("Rs", F64),
                 ("vx", F64), ("vy", F64), ("vz", F64),
                 ("rho0", F64), ("conc", F64), ("rmin", F64),
                 ("rmax", F64), ("r200", F64), ("r500", F64),
-                ("m200", F64), ("m500", F64)]
+                ("m200", F64), ("m500", F64), ("lambda200c", F64)]
 paths = csiborgtools.read.CSiBORGPaths()
 
 for i, n_sim in enumerate(paths.ic_ids):
@@ -75,7 +75,8 @@ for i, n_sim in enumerate(paths.ic_ids):
             # Pick clump and its particles
             xs = csiborgtools.fits.pick_single_clump(n, parts, part_clumps,
                                                      clumps)
-            clump = csiborgtools.fits.Clump.from_arrays(*xs, rhoc=box.box_rhoc)
+            clump = csiborgtools.fits.Clump.from_arrays(
+                *xs, rhoc=box.box_rhoc, G=box.box_G)
             out["npart"][n] = clump.Npart
             out["rmin"][n] = clump.rmin
             out["rmax"][n] = clump.rmax
@@ -90,6 +91,7 @@ for i, n_sim in enumerate(paths.ic_ids):
             out["r500"][n] = rs[1]
             out["m200"][n] = ms[0]
             out["m500"][n] = ms[1]
+            out["lambda200c"][n] = clump.lambda200c
 
             # NFW profile fit
             if clump.Npart > 10 and numpy.isfinite(out["r200"][n]):
