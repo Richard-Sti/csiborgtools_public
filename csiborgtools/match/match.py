@@ -122,7 +122,38 @@ class RealisationsMatcher:
         """
         return [i for i in range(self.cats.N) if i != n_sim]
 
-    def cross_knn_position_single(self, n_sim, nmult=5, dlogmass=2):
+    def cosine_similarity(self, x, y):
+        r"""
+        Calculate the cosine similarity between two Cartesian vectors. Defined
+        as :math:`\Sum_{i} x_i y_{i} / (|x|  |y|)`.
+
+        Parameters
+        ----------
+        x : 1-dimensional array
+            The first vector.
+        y : 1- or 2-dimensional array
+            The second vector. Can be 2-dimensional of shape `(n_samples, 3)`,
+            in which case the calculation is broadcasted.
+
+        Returns
+        -------
+        out : float or 1-dimensional array
+            The cosine similarity. If y is 1-dimensinal returns only a float.
+        """
+        # Quick check of dimensions
+        if x.ndim != 1:
+            raise ValueError("`x` must be a 1-dimensional array.")
+        y = y.reshape(-1, 3) if y.ndim == 1 else y
+
+        out = numpy.sum(x * y, axis=1)
+        out /= numpy.linalg.norm(x) * numpy.linalg.norm(y, axis=1)
+
+        if out.size == 1:
+            return out[0]
+        return out
+
+    def cross_knn_position_single(self, n_sim, nmult=5, dlogmass=2,
+                                  verbose=True):
         r"""
         Find all neighbours within :math:`n_{\rm mult} R_{200c}` of halos in
         the `nsim`th simulation. Also enforces that the neighbours'
@@ -153,8 +184,13 @@ class RealisationsMatcher:
         pos = self.cats[n_sim].positions
 
         matches = [None] * (self.cats.N - 1)
+        # Verbose iterator
+        if verbose:
+            iters = enumerate(tqdm(self.search_sim_indices(n_sim)))
+        else:
+            iters = enumerate(self.search_sim_indices(n_sim))
         # Search for neighbours in the other simulations
-        for count, i in enumerate(self.search_sim_indices(n_sim)):
+        for count, i in iters:
             dist, indxs = self.cats[i].radius_neigbours(pos, r200 * nmult)
             # Get rid of neighbors whose mass is too off
             for j, indx in enumerate(indxs):

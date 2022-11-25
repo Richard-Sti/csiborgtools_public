@@ -20,7 +20,7 @@ import numpy
 from scipy.interpolate import interp1d
 from astropy.cosmology import LambdaCDM
 from astropy import (constants, units)
-from ..read import read_info
+from ..read import ParticleReader
 
 
 # Map of unit conversions
@@ -38,18 +38,17 @@ class BoxUnits:
 
     Paramaters
     ----------
-    Nsnap : int
-        Snapshot index.
-    simpath : str
-        Path to the simulation where its snapshot index folders are stored.
+    paths : py:class`csiborgtools.read.CSiBORGPaths`
+        CSiBORG paths-handling object with set `n_sim` and `n_snap`.
     """
     _cosmo = None
 
-    def __init__(self, Nsnap, simpath):
+    def __init__(self, paths):
         """
         Read in the snapshot info file and set the units from it.
         """
-        info = read_info(Nsnap, simpath)
+        partreader = ParticleReader(paths)
+        info = partreader.read_info()
         pars = ["boxlen", "time", "aexp", "H0",
                 "omega_m", "omega_l", "omega_k", "omega_b",
                 "unit_l", "unit_d", "unit_t"]
@@ -220,6 +219,8 @@ class BoxUnits:
         r"""
         Convert the box comoving distance to cosmological redshift.
 
+        NOTE: this likely is already the observed redshift.
+
         Parameters
         ----------
         dist : float
@@ -236,8 +237,24 @@ class BoxUnits:
 
     def box2pecredshift(self, vx, vy, vz, px, py, pz, p0x=0, p0y=0, p0z=0):
         """
-        TODO: docs
+        Convert the box phase-space information to a peculiar redshift.
 
+        NOTE: there is some confusion about this.
+
+        Parameters
+        ----------
+        vx, vy, vz : 1-dimensional arrays
+            The Cartesian velocity components.
+        px, py, pz : 1-dimensional arrays
+            The Cartesian position vectors components.
+        p0x, p0y, p0z : floats
+            The centre of the box. By default 0, in which it is assumed that
+            the coordinates are already centred.
+
+        Returns
+        -------
+        pec_redshift : 1-dimensional array
+            The peculiar redshift.
         """
         # Peculiar velocity along the radial distance
         r = numpy.vstack([px - p0x, py - p0y, pz - p0z]).T
@@ -251,8 +268,24 @@ class BoxUnits:
 
     def box2obsredshift(self, vx, vy, vz, px, py, pz, p0x=0, p0y=0, p0z=0):
         """
-        TODO: docs
+        Convert the box phase-space information to an 'observed' redshift.
 
+        NOTE: there is some confusion about this.
+
+        Parameters
+        ----------
+        vx, vy, vz : 1-dimensional arrays
+            The Cartesian velocity components.
+        px, py, pz : 1-dimensional arrays
+            The Cartesian position vectors components.
+        p0x, p0y, p0z : floats
+            The centre of the box. By default 0, in which it is assumed that
+            the coordinates are already centred.
+
+        Returns
+        -------
+        obs_redshift : 1-dimensional array
+            The observed redshift.
         """
         r = numpy.vstack([px - p0x, py - p0y, pz - p0z]).T
         zcosmo = self.box2cosmoredshift(numpy.sum(r**2, axis=1)**0.5)
