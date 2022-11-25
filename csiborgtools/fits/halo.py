@@ -261,6 +261,8 @@ class Clump:
     rhoc : float, optional
         The critical density :math:`\rho_c` at this snapshot in box units. By
         default not set.
+    G : float, optional
+        The gravitational constant :math:`G` in box units. By default not set.
     """
     _r = None
     _rmin = None
@@ -272,9 +274,10 @@ class Clump:
     _Npart = None
     _index = None
     _rhoc = None
+    _G = None
 
     def __init__(self, x, y, z, m, x0, y0, z0, clump_mass=None,
-                 vx=None, vy=None, vz=None, index=None, rhoc=None):
+                 vx=None, vy=None, vz=None, index=None, rhoc=None, G=None):
         self.pos = (x, y, z, x0, y0, z0)
         self.clump_pos = (x0, y0, z0)
         self.clump_mass = clump_mass
@@ -282,6 +285,7 @@ class Clump:
         self.m = m
         self.index = index
         self.rhoc = rhoc
+        self.G = G
 
     @property
     def pos(self):
@@ -481,6 +485,26 @@ class Clump:
         self._rhoc = rhoc
 
     @property
+    def G(self):
+        r"""
+        The gravitational constant :math:`G` in box units.
+
+        Returns
+        -------
+        G : float
+        """
+        if self._G is None:
+            raise ValueError("The grav. constant `G` has not been set.")
+        return self._G
+
+    @G.setter
+    def G(self, G):
+        """Sets the gravitational constant. Makes sure it is > 0."""
+        if G is not None and not G > 0:
+            raise ValueError("Gravitational constant `G` must be > 0.")
+        self._G = G
+
+    @property
     def total_particle_mass(self):
         """
         Total mass of all particles.
@@ -612,10 +636,45 @@ class Clump:
 
         return rfound, mfound
 
-    @classmethod
-    def from_arrays(cls, particles, clump, rhoc=None):
+    @property
+    def angular_momentum(self):
         """
-        Initialises `Halo` from `particles` containing the relevant particle
+        The clump angular momentum in the box coordinates.
+
+        Returns
+        -------
+        J : 1-dimensional array or shape `(3, )`
+        """
+        J = numpy.cross(self.pos - self.center_mass, self.vel)
+        return numpy.einsum("i,ij->j", self.m, J)
+
+    @property
+    def lambda200c(self):
+        r"""
+        The clump Bullock spin [1] in a radius of :math:`R_{\rm 200c}`.
+
+        References
+        ----------
+        [1] A Universal Angular Momentum Profile for Galactic Halos; 2001;
+        Bullock, J. S.;  Dekel, A.;  Kolatt, T. S.;  Kravtsov, A. V.;
+        Klypin, A. A.;  Porciani, C.;  Primack, J. R.
+
+        Returns
+        -------
+        lambda200c : float
+        """
+        J = self.angular_momentum
+
+        G = 0.03671905417237583
+        R, M = self.spherical_overdensity_mass(200)
+        V = numpy.sqrt(G * M / R)
+
+        return numpy.linalg.norm(J) / (numpy.sqrt(2) * M * V * R)
+
+    @classmethod
+    def from_arrays(cls, particles, clump, rhoc=None, G=None):
+        r"""
+        Initialises `Clump` from `particles` containing the relevant particle
         information and its `clump` information.
 
         Paramaters
@@ -626,6 +685,12 @@ class Clump:
         clump : array
             A slice of a `clumps` array corresponding to this clump. Must
             contain `["peak_x", "peak_y", "peak_z", "mass_cl"]`.
+        rhoc : float, optional
+            The critical density :math:`\rho_c` at this snapshot in box units.
+            By default not set.
+        G : float, optional
+            The gravitational constant :math:`G` in box units. By default not
+            set.
 
         Returns
         -------
@@ -639,4 +704,5 @@ class Clump:
             vx, vy, vz = (particles[p] for p in ["vx", "vy", "vz"])
         except ValueError:
             vx, vy, vz = None, None, None
-        return cls(x, y, z, m, x0, y0, z0, cl_mass, vx, vy, vz, hindex, rhoc)
+        return cls(x, y, z, m, x0, y0, z0, cl_mass,
+                   vx, vy, vz, hindex, rhoc, G)
