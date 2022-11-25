@@ -1,7 +1,8 @@
 # CSiBORG tools
 
 ## :scroll: Short-term TODO
-- [ ] Make sure I am not taking halos outside of the well-resolved region.
+- [x] Make sure I am not taking halos outside of the well-resolved region.
+- [ ] Check alignment of the angular momentum
 - [ ] Calculate the gravitational potential.
 
 
