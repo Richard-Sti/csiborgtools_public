@@ -651,7 +651,8 @@ class Clump:
     @property
     def lambda200c(self):
         r"""
-        The clump Bullock spin [1] in a radius of :math:`R_{\rm 200c}`.
+        The clump Bullock spin, see Eq. 5 in [1], in a radius of
+        :math:`R_{\rm 200c}`.
 
         References
         ----------
@@ -664,11 +665,8 @@ class Clump:
         lambda200c : float
         """
         J = self.angular_momentum
-
-        G = 0.03671905417237583
         R, M = self.spherical_overdensity_mass(200)
-        V = numpy.sqrt(G * M / R)
-
+        V = numpy.sqrt(self.G * M / R)
         return numpy.linalg.norm(J) / (numpy.sqrt(2) * M * V * R)
 
     @classmethod
