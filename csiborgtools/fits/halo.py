@@ -425,8 +425,7 @@ class Clump:
 
         Returns
         -------
-        m : 1-dimensional array
-            Array of shape `(n_particles, )`.
+        m : 1-dimensional array of shape `(n_particles, )`
         """
         return self._m
 
@@ -436,6 +435,17 @@ class Clump:
         if not isinstance(m, numpy.ndarray) and m.size != self.r.size:
             raise TypeError("`r` and `m` must be equal size 1-dim arrays.")
         self._m = m
+
+    @property
+    def center_mass(self):
+        """
+        Clump center of mass.
+
+        Returns
+        -------
+        cm : 1-dimensional array
+        """
+        return numpy.average(self.pos, axis=0, weights=self.m)
 
     @property
     def index(self):
