@@ -290,8 +290,7 @@ class Clump:
 
         Returns
         -------
-        pos : 2-dimensional array
-            Array of shape `(n_particles, 3)`.
+        pos : 2-dimensional array of shape `(n_particles, 3)`.
         """
         return self._pos
 
@@ -312,8 +311,7 @@ class Clump:
 
         Returns
         -------
-        r : 1-dimensional array
-            Array of shape `(n_particles, )`.
+        r : 1-dimensional array of shape `(n_particles, )`.
         """
         return self._r
 
@@ -325,7 +323,6 @@ class Clump:
         Returns
         -------
         rmin : float
-            The minimum distance.
         """
         return self._rmin
 
@@ -337,7 +334,6 @@ class Clump:
         Returns
         -------
         rmin : float
-            The maximum distance.
         """
         return self._rmax
 
@@ -349,7 +345,6 @@ class Clump:
         Returns
         -------
         Npart : int
-            Number of particles.
         """
         return self._Npart
 
@@ -360,8 +355,7 @@ class Clump:
 
         Returns
         -------
-        pos : 1-dimensional array
-            Array of shape `(3, )`.
+        pos : 1-dimensional array of shape `(3, )`
         """
         return self._clump_pos
 
@@ -381,7 +375,6 @@ class Clump:
         Returns
         -------
         mass : float
-            Clump mass.
         """
         if self._clump_mass is None:
             raise ValueError("Clump mass `clump_mass` has not been set.")
@@ -401,8 +394,7 @@ class Clump:
 
         Returns
         -------
-        vel : 2-dimensional array
-            Array of shape (`n_particles, 3`).
+        vel : 2-dimensional array of shape (`n_particles, 3`)
         """
         if self._vel is None:
             raise ValueError("Velocities `vel` have not been set.")
@@ -443,7 +435,7 @@ class Clump:
 
         Returns
         -------
-        cm : 1-dimensional array
+        cm : 1-dimensional array of shape `(3, )`
         """
         return numpy.average(self.pos, axis=0, weights=self.m)
 
@@ -455,7 +447,6 @@ class Clump:
         Returns
         -------
         hindex : int
-            The index.
         """
         if self._index is None:
             raise ValueError("Halo index `hindex` has not been set.")
@@ -476,7 +467,6 @@ class Clump:
         Returns
         -------
         rhoc : float
-            The critical density.
         """
         if self._rhoc is None:
             raise ValueError("The critical density `rhoc` has not been set.")
@@ -497,7 +487,6 @@ class Clump:
         Returns
         -------
         tot_mass : float
-            The summed mass.
         """
         return numpy.sum(self.m)
 
@@ -508,8 +497,7 @@ class Clump:
 
         Returns
         -------
-        pos : 1-dimensional array
-            Array of shape `(3, )`.
+        pos : 1-dimensional array of shape `(3, )`
         """
         return numpy.mean(self.pos + self.clump_pos, axis=0)
 
@@ -546,7 +534,6 @@ class Clump:
         Returns
         -------
         vol : float
-            The enclosed volume.
         """
         return 4 * numpy.pi / 3 * (rmax**3 - rmin**3)
 
@@ -642,7 +629,6 @@ class Clump:
         Returns
         -------
         clump : `Clump`
-            An initialised clump object.
         """
         x, y, z, m = (particles[p] for p in ["x", "y", "z", "M"])
         x0, y0, z0, cl_mass, hindex = (
