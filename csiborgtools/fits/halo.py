@@ -431,7 +431,8 @@ class Clump:
     @property
     def center_mass(self):
         """
-        Clump center of mass.
+        Clump center of mass. Note that this is already in a frame centered at
+        the clump's potential minimum.
 
         Returns
         -------
