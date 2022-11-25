@@ -2,7 +2,7 @@
 
 ## :scroll: Short-term TODO
 - [ ] Make sure I am not taking halos outside of the well-resolved region.
-- [ ] Prepare the ASCII file for Powmes
+- [ ] Calculate the gravitational potential.
 
 
 ## :hourglass: Long-term TODO
