@@ -34,9 +34,11 @@ class HaloCatalogue:
     ----------
     paths : py:class:`csiborgtools.read.CSiBORGPaths`
         CSiBORG paths-handling object with set `n_sim` and `n_snap`.
-    minimum_m500 : float, optional
+    min_m500 : float, optional
         The minimum :math:`M_{rm 500c} / M_\odot` mass. By default no
         threshold.
+    max_dist : float, optional
+        The maximum comoving distance of a halo. By default no upper limit.
     """
     _box = None
     _paths = None
@@ -44,11 +46,12 @@ class HaloCatalogue:
     _knn = None
     _positions = None
 
-    def __init__(self, paths, minimum_m500=None):
+    def __init__(self, paths, min_m500=None, max_dist=None):
         self._box = BoxUnits(paths)
-        minimum_m500 = 0 if minimum_m500 is None else minimum_m500
+        min_m500 = 0 if min_m500 is None else min_m500
+        max_dist = numpy.infty if max_dist is None else max_dist
         self._paths = paths
-        self._set_data(minimum_m500)
+        self._set_data(min_m500, max_dist)
         # Initialise the KNN
         knn = NearestNeighbors()
         knn.fit(self.positions)
@@ -122,7 +125,7 @@ class HaloCatalogue:
         """
         return self.paths.n_sim
 
-    def _set_data(self, minimum_m500):
+    def _set_data(self, min_m500, max_dist):
         """
         Loads the data, merges with mmain, does various coordinate transforms.
         """
@@ -157,11 +160,14 @@ class HaloCatalogue:
         data = self.box.convert_from_boxunits(data, convert_cols)
 
         # Cut on mass. Note that this is in Msun
-        data = data[data["m500"] > minimum_m500]
+        data = data[data["m500"] > min_m500]
 
         # Now calculate spherical coordinates
         d, ra, dec = cartesian_to_radec(data)
         data = add_columns(data, [d, ra, dec], ["dist", "ra", "dec"])
+
+        # Cut on separation
+        data = data[data["dist"] < max_dist]
 
         # Pre-allocate the positions array
         self._positions = numpy.vstack(
@@ -265,9 +271,11 @@ class CombinedHaloCatalogue:
     paths : py:class`csiborgtools.read.CSiBORGPaths`
         CSiBORG paths-handling object. Doest not have to have set set `n_sim`
         and `n_snap`.
-    minimum_m500 : float, optional
+    min_m500 : float, optional
         The minimum :math:`M_{rm 500c} / M_\odot` mass. By default no
         threshold.
+    max_dist : float, optional
+        The maximum comoving distance of a halo. By default no upper limit.
     verbose : bool, optional
         Verbosity flag for reading the catalogues.
     """
@@ -275,7 +283,7 @@ class CombinedHaloCatalogue:
     _n_snaps = None
     _cats = None
 
-    def __init__(self, paths, minimum_m500=None, verbose=True):
+    def __init__(self, paths, min_m500=None, max_dist=None, verbose=True):
         # Read simulations and their maximum snapshots
         # NOTE remove this later and take all cats
         self._n_sims = paths.ic_ids[:10]
@@ -286,7 +294,7 @@ class CombinedHaloCatalogue:
         for i in trange(self.N) if verbose else range(self.N):
             paths = deepcopy(paths)
             paths.set_info(self.n_sims[i], self.n_snaps[i])
-            cats[i] = HaloCatalogue(paths, minimum_m500)
+            cats[i] = HaloCatalogue(paths, min_m500, max_dist)
         self._cats = cats
 
     @property
