@@ -199,6 +199,28 @@ class DensityField:
         return MASL.tidal_tensor(delta, self.box._omega_m, self.box._aexp,
                                  "CIC")
 
+    def gravitational_field(self, grid, verbose=True):
+        """
+        Calculate the gravitational tensor field. Note that this method is
+        only defined in fork of `Pylians`.
+
+        Parameters
+        ----------
+        grid : int
+            The grid size.
+        verbose : float, optional
+            A verbosity flag. By default `True`.
+
+        Returns
+        -------
+        grav_field_tensor : :py:class:`MAS_library.grav_field_tensor`
+            Tidal tensor object, whose attributes `grav_field_tensor.gi`
+            contain the relevant tensor components.
+        """
+        delta = self.overdensity_field(grid, verbose)
+        return MASL.grav_field_tensor(
+            delta, self.box._omega_m, self.box._aexp, "CIC")
+
     def smooth_field(self, field, scale, threads=1):
         """
         Smooth a field with a Gaussian filter.
