@@ -16,7 +16,6 @@
 Notebook utility functions.
 """
 
-# import numpy
 # from os.path import join
 
 # try:
