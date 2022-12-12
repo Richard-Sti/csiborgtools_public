@@ -18,3 +18,4 @@ from .make_cat import (HaloCatalogue, CombinedHaloCatalogue)  # noqa
 from .readobs import (PlanckClusters, MCXCClusters, TwoMPPGalaxies,  # noqa
                       TwoMPPGroups, SDSS)  # noqa
 from .outsim import (dump_split, combine_splits, make_ascii_powmes)  # noqa
+from .summaries import PKReader  # noqa

@@ -12,9 +12,12 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-
+"""
+Density field and cross-correlation calculations.
+"""
 import numpy
 import MAS_library as MASL
+import Pk_library as PKL
 import smoothing_library as SL
 from warnings import warn
 from tqdm import trange
@@ -22,15 +25,24 @@ from ..units import (BoxUnits, radec_to_cartesian)
 
 
 class DensityField:
-    """
+    r"""
     Density field calculations. Based primarily on routines of Pylians [1].
 
     Parameters
     ----------
     particles : structured array
-        Particle array. Must contain keys `['x', 'y', 'z', 'M']`.
+        Particle array. Must contain keys `['x', 'y', 'z', 'M']`. Particle
+        coordinates are assumed to be :math:`\in [0, 1]` or in box units
+        otherwise.
+    boxsize : float
+        Box length. Multiplies `particles` positions to fix the power spectum
+        units.
     box : :py:class:`csiborgtools.units.BoxUnits`
         The simulation box information and transformations.
+    MAS : str, optional
+        Mass assignment scheme. Options are Options are: 'NGP' (nearest grid
+        point), 'CIC' (cloud-in-cell), 'TSC' (triangular-shape cloud), 'PCS'
+        (piecewise cubic spline).
 
     References
     ----------
@@ -39,11 +51,13 @@ class DensityField:
     _particles = None
     _boxsize = None
     _box = None
+    _MAS = None
 
-    def __init__(self, particles, box):
+    def __init__(self, particles, boxsize, box, MAS="CIC"):
         self.particles = particles
         self.box = box
-        self._boxsize = 1.
+        self.boxsize = boxsize
+        self.MAS = MAS
 
     @property
     def particles(self):
@@ -65,6 +79,22 @@ class DensityField:
         self._particles = particles
 
     @property
+    def boxsize(self):
+        """
+        Box length. Determines the power spectrum units.
+
+        Returns
+        -------
+        boxsize : float
+        """
+        return self._boxsize
+
+    @boxsize.setter
+    def boxsize(self, boxsize):
+        """Set `self.boxsize`."""
+        self._boxsize = boxsize
+
+    @property
     def box(self):
         """
         The simulation box information and transformations.
@@ -83,15 +113,24 @@ class DensityField:
         self._box = box
 
     @property
-    def boxsize(self):
+    def MAS(self):
         """
-        Boxsize.
+        The mass-assignment scheme.
 
         Returns
         -------
-        boxsize : float
+        MAS : str
         """
-        return self._boxsize
+        return self._MAS
+
+    @MAS.setter
+    def MAS(self, MAS):
+        """Sets `self.MAS`."""
+        opts = ["NGP", "CIC", "TSC", "PCS"]
+        if MAS not in opts:
+            raise ValueError("Invalid MAS `{}`. Options are: `{}`."
+                             .format(MAS, opts))
+        self._MAS = MAS
 
     @staticmethod
     def _force_f32(x, name):
@@ -127,11 +166,10 @@ class DensityField:
         pos *= self.boxsize
         pos = self._force_f32(pos, "pos")
         weights = self._force_f32(self.particles['M'], 'M')
-        MAS = "CIC"  # Cloud in cell
 
         # Pre-allocate and do calculations
         rho = numpy.zeros((grid, grid, grid), dtype=numpy.float32)
-        MASL.MA(pos, rho, self.boxsize, MAS, W=weights, verbose=verbose)
+        MASL.MA(pos, rho, self.boxsize, self.MAS, W=weights, verbose=verbose)
         return rho
 
     def overdensity_field(self, grid, verbose=True):
@@ -176,7 +214,8 @@ class DensityField:
         delta = self.overdensity_field(grid, verbose)
         if verbose:
             print("Calculating potential from the overdensity..")
-        return MASL.potential(delta, self.box._omega_m, self.box._aexp, "CIC")
+        return MASL.potential(
+            delta, self.box._omega_m, self.box._aexp, self.MAS)
 
     def tensor_field(self, grid, verbose=True):
         """
@@ -196,8 +235,8 @@ class DensityField:
             the relevant tensor components.
         """
         delta = self.overdensity_field(grid, verbose)
-        return MASL.tidal_tensor(delta, self.box._omega_m, self.box._aexp,
-                                 "CIC")
+        return MASL.tidal_tensor(
+            delta, self.box._omega_m, self.box._aexp, self.MAS)
 
     def gravitational_field(self, grid, verbose=True):
         """
@@ -219,7 +258,28 @@ class DensityField:
         """
         delta = self.overdensity_field(grid, verbose)
         return MASL.grav_field_tensor(
-            delta, self.box._omega_m, self.box._aexp, "CIC")
+            delta, self.box._omega_m, self.box._aexp, self.MAS)
+
+    def auto_powerspectrum(self, grid, verbose=True):
+        """
+        Calculate the auto 1-dimensional power spectrum.
+
+        Parameters
+        ----------
+        grid : int
+            The grid size.
+        verbose : float, optional
+            A verbosity flag. By default `True`.
+
+        Returns
+        -------
+        pk : py:class`Pk_library.Pk`
+            Power spectrum object.
+        """
+        delta = self.overdensity_field(grid, verbose)
+        return PKL.Pk(
+            delta, self.boxsize, axis=1, MAS=self.MAS, threads=1,
+            verbose=verbose)
 
     def smooth_field(self, field, scale, threads=1):
         """
