@@ -15,13 +15,12 @@
 """
 Functions to read in the particle and clump files.
 """
-
 import numpy
 from os.path import join
 from tqdm import trange
 from copy import deepcopy
 from sklearn.neighbors import NearestNeighbors
-from .readsim import read_mmain
+from .readsim import (read_mmain, read_initcm)
 from ..utils import (flip_cols, add_columns)
 from ..units import (BoxUnits, cartesian_to_radec)
 
@@ -45,6 +44,7 @@ class HaloCatalogue:
     _data = None
     _knn = None
     _positions = None
+    _positions0 = None
 
     def __init__(self, paths, min_m500=None, max_dist=None):
         self._box = BoxUnits(paths)
@@ -117,7 +117,7 @@ class HaloCatalogue:
     @property
     def n_sim(self):
         """
-        The initiali condition (IC) realisation ID.
+        The initial condition (IC) realisation ID.
 
         Returns
         -------
@@ -141,6 +141,12 @@ class HaloCatalogue:
 
         # Cut on number of particles and finite m200
         data = data[(data["npart"] > 100) & numpy.isfinite(data["m200"])]
+
+        # Now also load the initial positions
+        initcm = read_initcm(self.n_sim, self.paths.initmatch_path)
+        if initcm is not None:
+            data = self.merge_initmatch_to_clumps(data, initcm)
+            flip_cols(data, "x0", "z0")
 
         # Calculate redshift
         pos = [data["peak_{}".format(p)] - 0.5 for p in ("x", "y", "z")]
@@ -171,9 +177,14 @@ class HaloCatalogue:
         # Cut on separation
         data = data[data["dist"] < max_dist]
 
-        # Pre-allocate the positions array
+        # Pre-allocate the positions arrays
         self._positions = numpy.vstack(
             [data["peak_{}".format(p)] for p in ("x", "y", "z")]).T
+        # And do the unit transform
+        if initcm is not None:
+            data = self.box.convert_from_boxunits(data, ["x0", "y0", "z0"])
+            self._positions0 = numpy.vstack(
+                [data["{}0".format(p)] for p in ("x", "y", "z")]).T
 
         self._data = data
 
@@ -203,10 +214,39 @@ class HaloCatalogue:
         X[mask, 1] = mmain["sub_frac"]
         return add_columns(clumps, X, ["mass_mmain", "sub_frac"])
 
+    def merge_initmatch_to_clumps(self, clumps, initcat):
+        """
+        Merge columns from the `init_cm` files to the `clump` file.
+
+        Parameters
+        ----------
+        clumps : structured array
+            Clumps structured array.
+        initcat : structured array
+            Catalog with the clumps initial centre of mass at z = 70.
+
+        Returns
+        -------
+        out : structured array
+        """
+        # There are more initcat clumps, so check which ones have z = 0
+        # and then downsample
+        mask = numpy.isin(initcat["ID"], clumps["index"])
+        initcat = initcat[mask]
+        # Now the index ordering should match
+        if not numpy.alltrue(initcat["ID"] == clumps["index"]):
+            raise ValueError(
+                "Ordering of `initcat` and `clumps` is inconsistent.")
+
+        X = numpy.full((clumps.size, 3), numpy.nan)
+        for i, p in enumerate(['x', 'y', 'z']):
+            X[:, i] = initcat[p]
+        return add_columns(clumps, X, ["x0", "y0", "z0"])
+
     @property
     def positions(self):
         """
-        3D positions of halos.
+        3D positions of halos in comoving units of Mpc.
 
         Returns
         -------
@@ -215,6 +255,21 @@ class HaloCatalogue:
             `x`, `y` and `z`.
         """
         return self._positions
+
+    @property
+    def positions0(self):
+        r"""
+        3D positions of halos in the initial snapshot in comoving units of Mpc.
+
+        Returns
+        -------
+        X : 2-dimensional array
+            Array of shape `(n_halos, 3)`, where the latter axis represents
+            `x`, `y` and `z`.
+        """
+        if self._positions0 is None:
+            raise RuntimeError("Initial positions are not set!")
+        return self._positions0
 
     @property
     def velocities(self):
@@ -239,6 +294,26 @@ class HaloCatalogue:
             Array of shape `(n_halos, 3)`.
         """
         return numpy.vstack([self["L{}".format(p)] for p in ("x", "y", "z")]).T
+
+    @property
+    def init_radius(self):
+        r"""
+        A fiducial initial radius of particles that are identified as a single
+        halo in the final snapshot. Estimated to be
+
+        ..math:
+            R = (3 N / 4 \pi)^{1 / 3} * \Delta
+
+        where :math:`N` is the number of particles and `Delta` is the initial
+        inter-particular distance :math:`Delta = 1 / 2^{11}` in box units. The
+        output fiducial radius is in comoving units of Mpc.
+
+        Returns
+        -------
+        R : float
+        """
+        delta = self.box.box2mpc(1 / 2**11)
+        return (3 * self["npart"] / (4 * numpy.pi))**(1/3) * delta
 
     def radius_neigbours(self, X, radius):
         """
@@ -272,6 +347,9 @@ class HaloCatalogue:
         return self.data.dtype.names
 
     def __getitem__(self, key):
+        initpars = ["x0", "y0", "z0"]
+        if key in initpars and key not in self.keys:
+            raise RuntimeError("Initial positions are not set!")
         return self._data[key]
 
 
@@ -299,8 +377,9 @@ class CombinedHaloCatalogue:
 
     def __init__(self, paths, min_m500=None, max_dist=None, verbose=True):
         # Read simulations and their maximum snapshots
-        # NOTE remove this later and take all cats
-        self._n_sims = paths.ic_ids[:10]
+        # NOTE later change this back to all simulations
+        self._n_sims = [7468, 7588, 8020, 8452, 8836]
+#        self._n_sims = paths.ic_ids
         n_snaps = [paths.get_maximum_snapshot(i) for i in self._n_sims]
         self._n_snaps = numpy.asanyarray(n_snaps)
 

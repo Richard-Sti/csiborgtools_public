@@ -18,10 +18,11 @@ Functions to read in the particle and clump files.
 
 import numpy
 from scipy.io import FortranFile
-from os import listdir
+import gc
 from os.path import (join, isfile, isdir)
 from glob import glob
 from tqdm import tqdm
+from warnings import warn
 from ..utils import (cols_to_structured, extract_from_structured)
 
 
@@ -56,22 +57,40 @@ class CSiBORGPaths:
     mmain_path : str, optional
         Path to where mmain files are stored. By default
         `/mnt/zfsusers/hdesmond/Mmain`.
+    initmatch_path : str, optional
+        Path to where match between the first and final snapshot is stored. By
+        default `/mnt/extraspace/rstiskalek/csiborg/initmatch/`.
+    to_new : bool, optional
+        Whether the paths should point to `new` files, for example
+        `ramses_out_8452_new`.
     """
     _srcdir = None
     _n_sim = None
     _n_snap = None
     _dumpdir = None
     _mmain_path = None
+    _initmatch_path = None
+    _to_new = None
 
-    def __init__(self, n_sim=None, n_snap=None,
-                 srcdir="/mnt/extraspace/hdesmond/",
-                 dumpdir="/mnt/extraspace/rstiskalek/csiborg/",
-                 mmain_path="/mnt/zfsusers/hdesmond/Mmain"):
+    # NOTE deuglify this stuff
+    def __init__(self, n_sim=None, n_snap=None, srcdir=None, dumpdir=None,
+                 mmain_path=None, initmatch_path=None, to_new=False):
+        if srcdir is None:
+            srcdir = "/mnt/extraspace/hdesmond/"
         self.srcdir = srcdir
+        if dumpdir is None:
+            dumpdir = "/mnt/extraspace/rstiskalek/csiborg/"
         self.dumpdir = dumpdir
+        if mmain_path is None:
+            mmain_path = "/mnt/zfsusers/hdesmond/Mmain"
         self.mmain_path = mmain_path
+        if initmatch_path is None:
+            initmatch_path = "/mnt/extraspace/rstiskalek/csiborg/initmatch/"
+        self.initmatch_path = initmatch_path
+        self.to_new = to_new
         if n_sim is not None and n_snap is not None:
             self.set_info(n_sim, n_snap)
+        # "/mnt/extraspace/rstiskalek/csiborg/initmatch/clump_cm_7468.npy"
 
     @property
     def srcdir(self):
@@ -146,6 +165,45 @@ class CSiBORGPaths:
         if not isdir(mmain_path):
             raise IOError("Invalid directory `{}`!".format(mmain_path))
         self._mmain_path = mmain_path
+
+    @property
+    def initmatch_path(self):
+        """
+        Path to where match between the first and final snapshot is stored.
+
+        Returns
+        -------
+        initmach_path : str
+        """
+        return self._initmatch_path
+
+    @initmatch_path.setter
+    def initmatch_path(self, initmatch_path):
+        """
+        Set `initmatch_path`, check that the directory exists.
+        """
+        if not isdir(initmatch_path):
+            raise IOError("Invalid directory `{}`!".format(initmatch_path))
+        self._initmatch_path = initmatch_path
+
+    @property
+    def to_new(self):
+        """
+        Flag whether paths should point to `new` files, for example
+        `ramses_out_8452_new`.
+
+        Returns
+        -------
+        to_new : bool
+        """
+        return self._to_new
+
+    @to_new.setter
+    def to_new(self, to_new):
+        """Set `to_new`."""
+        if not isinstance(to_new, bool):
+            raise TypeError("`to_new` must be be a bool")
+        self._to_new = to_new
 
     @property
     def n_sim(self):
@@ -236,13 +294,25 @@ class CSiBORGPaths:
     def ic_ids(self):
         """
         CSiBORG initial condition (IC) simulation IDs from the list of folders
-        in `self.srcdir`. Assumes that the folders look like `ramses_out_X`
-        and extracts the `X` integer. Removes `5511` from the list of IDs.
+        in `self.srcdir`.
 
         Returns
         -------
         ids : 1-dimensional array
             Array of CSiBORG simulation IDs.
+        """
+        if self.to_new:
+            return self._ic_ids_new
+        return self._ic_ids
+
+    @property
+    def _ic_ids(self):
+        """
+        IC simulation IDs.
+
+        Returns
+        -------
+        ids : 1-dimensional array
         """
         files = glob(join(self.srcdir, "ramses_out*"))
         # Select only file names
@@ -258,6 +328,25 @@ class CSiBORGPaths:
             ids.remove(5511)
         except ValueError:
             pass
+        return numpy.sort(ids)
+
+    @property
+    def _ic_ids_new(self):
+        """
+        ICs simulation IDs denoted as `new` with recoved :math:`z = 70`
+        particle information.
+
+        Returns
+        -------
+        ids : 1-dimensional array
+        """
+        files = glob(join(self.srcdir, "ramses_out*"))
+        # Select only file names
+        files = [f.split("/")[-1] for f in files]
+        # Only _new files
+        files = [f for f in files if "_new" in f]
+        # Take the ICs
+        ids = [int(f.split("_")[2]) for f in files]
         return numpy.sort(ids)
 
     def ic_path(self, n_sim=None):
@@ -276,6 +365,8 @@ class CSiBORGPaths:
         """
         n_sim = self.get_n_sim(n_sim)
         fname = "ramses_out_{}"
+        if self.to_new:
+            fname += "_new"
         return join(self.srcdir, fname.format(n_sim))
 
     def get_snapshots(self, n_sim=None):
@@ -291,7 +382,6 @@ class CSiBORGPaths:
         Returns
         -------
         snapshots : 1-dimensional array
-            Array of snapshot IDs.
         """
         n_sim = self.get_n_sim(n_sim)
         simpath = self.ic_path(n_sim)
@@ -314,7 +404,6 @@ class CSiBORGPaths:
         Returns
         -------
         maxsnap : float
-            Maximum snapshot.
         """
         n_sim = self.get_n_sim(n_sim)
         return max(self.get_snapshots(n_sim))
@@ -332,7 +421,6 @@ class CSiBORGPaths:
         Returns
         -------
         minsnap : float
-            Minimum snapshot.
         """
         n_sim = self.get_n_sim(n_sim)
         return min(self.get_snapshots(n_sim))
@@ -353,7 +441,6 @@ class CSiBORGPaths:
         Returns
         -------
         snappath : str
-            Path to the CSiBORG IC realisation snapshot.
         """
         n_snap = self.get_n_snap(n_snap)
         n_sim = self.get_n_sim(n_sim)
@@ -454,15 +541,6 @@ class ParticleReader:
         if verbose:
             print("Reading in output `{}` with ncpu = `{}`."
                   .format(nout, ncpu))
-
-        # Check whether the unbinding file exists.
-        snapdirlist = listdir(snappath)
-        unbinding_file = "unbinding_{}.out00001".format(nout)
-        if unbinding_file not in snapdirlist:
-            raise FileNotFoundError(
-                "Couldn't find `{}` in `{}`. Use mergertreeplot.py -h or "
-                "--help to print help message."
-                .format(unbinding_file, snappath))
 
         # First read the headers. Reallocate arrays and fill them.
         nparts = numpy.zeros(ncpu, dtype=int)
@@ -761,25 +839,46 @@ def read_mmain(n, srcdir, fname="Mmain_{}.npy"):
     return out
 
 
-def get_positions(n_sim, n_snap, get_clumpid, verbose=True,
-                  srcdir="/mnt/extraspace/hdesmond/"):
+def read_initcm(n, srcdir, fname="clump_cm_{}.npy"):
+    """
+    Read `clump_cm`, i.e. the center of mass of a clump at redshift z = 70.
+    If the file does not exist returns `None`.
+
+    Parameters
+    ----------
+    n : int
+        The index of the initial conditions (IC) realisation.
+    srcdir : str
+        The path to the folder containing the files.
+    fname : str, optional
+        The file name convention.  By default `clump_cm_{}.npy`, where the
+        substituted value is `n`.
+
+    Returns
+    -------
+    out : structured array
+    """
+    fpath = join(srcdir, fname.format(n))
+    try:
+        return numpy.load(fpath)
+    except FileNotFoundError:
+        warn("File {} does not exist.".format(fpath))
+        return None
+
+
+def get_positions(paths, get_clumpid, verbose=True):
     """
     Shortcut to get particle IDs, positions, masses and optionally clump
     indices.
 
     Parameters
     ----------
-    n_sim : int
-        CSiBORG IC realisation index.
-    n_snap : int
-        Snapshot index.
+    paths : py:class`csiborgtools.read.CSiBORGPaths`
+        CSiBORG paths-handling object with set `n_sim` and `n_snap`.
     get_clumpid : bool
         Whether to also return the clump indices.
     verbose : bool, optional
         Verbosity flag. By default `True`.
-    srcdir : str, optional
-        The file path to the folder where realisations of the ICs are stored.
-        By default `/mnt/extraspace/hdesmond/`.
 
     Returns
     -------
@@ -793,9 +892,6 @@ def get_positions(n_sim, n_snap, get_clumpid, verbose=True,
         Particles' clump IDs of shape `(n_particles, )`. Returned only if
         `get_clumpid` is `True`.
     """
-    # Setup the paths
-    paths = CSiBORGPaths(srcdir)
-    paths.set_info(n_sim, n_snap)
     # Extract particles
     reader = ParticleReader(paths)
     pars_extract = ["ID", "x", "y", "z", "M"]
@@ -805,8 +901,10 @@ def get_positions(n_sim, n_snap, get_clumpid, verbose=True,
     pids = extract_from_structured(particles, "ID")
     ppos = extract_from_structured(particles, ["x", "y", "z"])
     pmass = extract_from_structured(particles, "M")
+
     # Force early memory release
     del particles
+    gc.collect()
 
     out = (pids, ppos, pmass)
 
