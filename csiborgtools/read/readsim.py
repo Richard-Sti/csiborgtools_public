@@ -72,7 +72,6 @@ class CSiBORGPaths:
     _initmatch_path = None
     _to_new = None
 
-    # NOTE deuglify this stuff
     def __init__(self, n_sim=None, n_snap=None, srcdir=None, dumpdir=None,
                  mmain_path=None, initmatch_path=None, to_new=False):
         if srcdir is None:
@@ -424,6 +423,24 @@ class CSiBORGPaths:
         """
         n_sim = self.get_n_sim(n_sim)
         return min(self.get_snapshots(n_sim))
+
+    def clump0_path(self, nsim):
+        """
+        Path to a single dumped clump's particles. This is expected to point
+        to a dictonary whose keys are the clump indices and items structured
+        arrays with the clump's particles in the initial snapshot.
+
+        Parameters
+        ----------
+        nsim : int
+            Index of the initial conditions (IC) realisation.
+
+        Returns
+        -------
+        path : str
+        """
+        cdir = join(self.dumpdir, "initmatch")
+        return join(cdir, "clump_{}_{}.npy".format(nsim, "particles"))
 
     def snapshot_path(self, n_snap=None, n_sim=None):
         """
@@ -839,7 +856,7 @@ def read_mmain(n, srcdir, fname="Mmain_{}.npy"):
     return out
 
 
-def read_initcm(n, srcdir, fname="clump_cm_{}.npy"):
+def read_initcm(n, srcdir, fname="clump_{}_cm.npy"):
     """
     Read `clump_cm`, i.e. the center of mass of a clump at redshift z = 70.
     If the file does not exist returns `None`.

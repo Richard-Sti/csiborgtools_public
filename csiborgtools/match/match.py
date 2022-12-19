@@ -79,6 +79,9 @@ class RealisationsMatcher:
     ----------
     cats : :py:class`csiborgtools.read.CombinedHaloCatalogue`
         Combined halo catalogue to search.
+    # NOTE add later
+#    dtype : dtype, optional
+#        Output precision. By default `numpy.float32`.
     """
     _cats = None
 
@@ -122,42 +125,42 @@ class RealisationsMatcher:
         """
         return [i for i in range(self.cats.N) if i != n_sim]
 
-    def cosine_similarity(self, x, y):
-        r"""
-        Calculate the cosine similarity between two Cartesian vectors. Defined
-        as :math:`\Sum_{i} x_i y_{i} / (|x| * |y|)`.
+    def _check_masskind(self, mass_kind):
+        """Check that `mass_kind` is a valid key."""
+        if mass_kind not in self.cats[0].keys:
+            raise ValueError("Invalid mass kind `{}`.".format(mass_kind))
+
+    @staticmethod
+    def _cat2clump_mapping(cat_indxs, clump_indxs):
+        """
+        Create a mapping from a catalogue array index to a clump array index.
 
         Parameters
         ----------
-        x : 1-dimensional array
-            The first vector.
-        y : 1- or 2-dimensional array
-            The second vector. Can be 2-dimensional of shape `(n_samples, 3)`,
-            in which case the calculation is broadcasted.
+        cat_indxs : 1-dimensional array
+            Clump indices in the catalogue array.
+        clump_indxs : 1-dimensional array
+            Clump indices in the clump array.
 
         Returns
         -------
-        out : float or 1-dimensional array
-            The cosine similarity. If y is 1-dimensinal returns only a float.
+        mapping : 1-dimensional array
+            Mapping. The array indices match catalogue array and values are
+            array positions in the clump array.
         """
-        # Quick check of dimensions
-        if x.ndim != 1:
-            raise ValueError("`x` must be a 1-dimensional array.")
-        y = y.reshape(-1, 3) if y.ndim == 1 else y
-
-        out = numpy.sum(x * y, axis=1)
-        out /= numpy.linalg.norm(x) * numpy.linalg.norm(y, axis=1)
-
-        if out.size == 1:
-            return out[0]
-        return out
+        mapping = numpy.full(cat_indxs.size, numpy.nan, dtype=int)
+        __, ind1, ind2 = numpy.intersect1d(clump_indxs, cat_indxs,
+                                           return_indices=True)
+        mapping[ind2] = ind1
+        return mapping
 
     def cross_knn_position_single(self, n_sim, nmult=5, dlogmass=None,
-                                  init_dist=False, verbose=True):
+                                  mass_kind="totpartmass", init_dist=False,
+                                  overlap=False, verbose=True):
         r"""
         Find all neighbours within :math:`n_{\rm mult} R_{200c}` of halos in
         the `nsim`th simulation. Also enforces that the neighbours'
-        :math:`\log M_{200c}` be within `dlogmass` dex.
+        :math:`\log M / M_\odot` be within `dlogmass` dex.
 
         Parameters
         ----------
@@ -169,43 +172,71 @@ class RealisationsMatcher:
             default 5.
         dlogmass : float, optional
             Tolerance on mass logarithmic mass difference. By default `None`.
+        mass_kind : str, optional
+            The mass kind whose similarity is to be checked. Must be a valid
+            catalogue key. By default `totpartmass`, i.e. the total particle
+            mass associated with a halo.
         init_dist : bool, optional
             Whether to calculate separation of the initial CMs. By default
             `False`.
+        overlap : bool, optional
+            Whether to calculate overlap between clumps in the initial
+            snapshot. By default `False`. Note that this operation is
+            substantially slower.
         verbose : bool, optional
             Iterator verbosity flag. By default `True`.
 
         Returns
         -------
         matches : composite array
-            Array, indices are `(n_sims - 1, 3, n_halos, n_matches)`. The
+            Array, indices are `(n_sims - 1, 4, n_halos, n_matches)`. The
             2nd axis is `index` of the neighbouring halo in its catalogue,
-            `dist`, which is the 3D distance to the halo whose neighbours are
-            searched, and `dist0` which is the separation of the initial CMs.
-            The latter is calculated only if `init_dist` is `True`.
+            `dist` is the 3D distance to the halo whose neighbours are
+            searched, `dist0` is the separation of the initial CMs and
+            `overlap` is the overlap over the initial clumps, all respectively.
+            The latter two are calculated only if `init_dist` or `overlap` is
+            `True`.
+
+        TODO:
+        - [ ] Precalculate the mapping from halo index to clump array position
         """
-        # Radius, M200c and positions of halos in `n_sim` IC realisation
-        logm200 = numpy.log10(self.cats[n_sim]["m200"])
+        self._check_masskind(mass_kind)
+        # Radius, mass and positions of halos in `n_sim` IC realisation
+        logmass = numpy.log10(self.cats[n_sim][mass_kind])
         R = self.cats[n_sim]["r200"]
         pos = self.cats[n_sim].positions
         if init_dist:
             pos0 = self.cats[n_sim].positions0  # These are CM positions
+        if overlap:
+            if verbose:
+                print("Loading initial clump particles for `n_sim = {}`."
+                      .format(n_sim))
+            # Grab a paths object. What it is set to is unimportant
+            paths = self.cats[0].paths
+            with open(paths.clump0_path(self.cats.n_sims[n_sim]), "rb") as f:
+                clumps0 = numpy.load(f, allow_pickle=True)
+            overlapper = ParticleOverlap()
+            cat2clumps0 = self._cat2clump_mapping(self.cats[n_sim]["index"],
+                                                  clumps0["ID"])
+
         matches = [None] * (self.cats.N - 1)
         # Verbose iterator
         if verbose:
             iters = enumerate(tqdm(self.search_sim_indices(n_sim)))
         else:
             iters = enumerate(self.search_sim_indices(n_sim))
+        iters = enumerate(self.search_sim_indices(n_sim))
         # Search for neighbours in the other simulations
         for count, i in iters:
             dist, indxs = self.cats[i].radius_neigbours(pos, R * nmult)
             # Get rid of neighbors whose mass is too off
             if dlogmass is not None:
                 for j, indx in enumerate(indxs):
-                    match_logm200 = numpy.log10(self.cats[i]["m200"][indx])
-                    mask = numpy.abs(match_logm200 - logm200[j]) < dlogmass
+                    match_logmass = numpy.log10(self.cats[i][mass_kind][indx])
+                    mask = numpy.abs(match_logmass - logmass[j]) < dlogmass
                     dist[j] = dist[j][mask]
                     indxs[j] = indx[mask]
+
             # Find distance to the between the initial CM
             dist0 = [numpy.asanyarray([], dtype=numpy.float64)] * dist.size
             if init_dist:
@@ -215,13 +246,47 @@ class RealisationsMatcher:
                     dist0[k] = numpy.linalg.norm(
                         pos0[k] - self.cats[i].positions0[indxs[k]], axis=1)
 
+            # Calculate the initial snapshot overlap
+            cross = [numpy.asanyarray([], dtype=numpy.float64)] * dist.size
+            if overlap:
+                if verbose:
+                    print("Loading initial clump particles for `n_sim = {}` "
+                          "to compare against `n_sim = {}`.".format(i, n_sim))
+                with open(paths.clump0_path(self.cats.n_sims[i]), 'rb') as f:
+                    clumpsx = numpy.load(f, allow_pickle=True)
+                cat2clumpsx = self._cat2clump_mapping(self.cats[i]["index"],
+                                                      clumpsx["ID"])
+
+                # Loop only over halos that have neighbours
+                with_neigbours = numpy.where([ii.size > 0 for ii in indxs])[0]
+                for k in tqdm(with_neigbours) if verbose else with_neigbours:
+                    # Find which clump matches index of this halo from cat
+                    match0 = cat2clumps0[k]
+
+                    # Get the clump and pre-calculate its cell assignment
+                    cl0 = clumps0["clump"][match0]
+                    cl0_cells = overlapper.assign_to_cell(
+                        *(cl0[p] for p in ('x', 'y', 'z')))
+                    dint = numpy.full(indxs[k].size, numpy.nan, numpy.float64)
+
+                    # Loop over the ones we cross-correlate with
+                    for ii, ind in enumerate(indxs[k]):
+                        # Again which cross clump to this index
+                        matchx = cat2clumpsx[ind]
+                        dint[ii] = overlapper.mass_overlap(
+                            cl0, clumpsx["clump"][matchx], cl0_cells)
+
+                    cross[k] = dint
+
             # Append as a composite array
-            matches[count] = numpy.asarray([indxs, dist, dist0], dtype=object)
+            matches[count] = numpy.asarray(
+                [indxs, dist, dist0, cross], dtype=object)
 
         return numpy.asarray(matches, dtype=object)
 
     def cross_knn_position_all(self, nmult=5, dlogmass=None,
-                               init_dist=False, verbose=True):
+                               mass_kind="totpartmass", init_dist=False,
+                               overlap=False, verbose=True):
         r"""
         Find all neighbours within :math:`n_{\rm mult} R_{200c}` of halos in
         all simulations listed in `self.cats`. Also enforces that the
@@ -234,9 +299,17 @@ class RealisationsMatcher:
             default 5.
         dlogmass : float, optional
             Tolerance on mass logarithmic mass difference. By default `None`.
+        mass_kind : str, optional
+            The mass kind whose similarity is to be checked. Must be a valid
+            catalogue key. By default `totpartmass`, i.e. the total particle
+            mass associated with a halo.
         init_dist : bool, optional
             Whether to calculate separation of the initial CMs. By default
             `False`.
+        overlap : bool, optional
+            Whether to calculate overlap between clumps in the initial
+            snapshot. By default `False`. Note that this operation is
+            substantially slower.
         verbose : bool, optional
             Iterator verbosity flag. By default `True`.
 
@@ -251,5 +324,136 @@ class RealisationsMatcher:
         # Loop over each catalogue
         for i in trange(N) if verbose else range(N):
             matches[i] = self.cross_knn_position_single(
-                i, nmult, dlogmass, init_dist)
+                i, nmult, dlogmass, mass_kind=mass_kind, init_dist=init_dist,
+                overlap=overlap, verbose=verbose)
         return matches
+
+
+###############################################################################
+#                           Matching statistics                               #
+###############################################################################
+
+
+def cosine_similarity(x, y):
+    r"""
+    Calculate the cosine similarity between two Cartesian vectors. Defined
+    as :math:`\Sum_{i} x_i y_{i} / (|x| * |y|)`.
+
+    Parameters
+    ----------
+    x : 1-dimensional array
+        The first vector.
+    y : 1- or 2-dimensional array
+        The second vector. Can be 2-dimensional of shape `(n_samples, 3)`,
+        in which case the calculation is broadcasted.
+
+    Returns
+    -------
+    out : float or 1-dimensional array
+        The cosine similarity. If y is 1-dimensinal returns only a float.
+    """
+    # Quick check of dimensions
+    if x.ndim != 1:
+        raise ValueError("`x` must be a 1-dimensional array.")
+    y = y.reshape(-1, 3) if y.ndim == 1 else y
+
+    out = numpy.sum(x * y, axis=1)
+    out /= numpy.linalg.norm(x) * numpy.linalg.norm(y, axis=1)
+
+    if out.size == 1:
+        return out[0]
+    return out
+
+
+class ParticleOverlap:
+    """
+    TODO:
+    - [ ] Class documentation
+    """
+    _bins = None
+
+    def __init__(self, bins=None):
+        if bins is None:
+            dx = 1 / 2**11
+            bins = numpy.arange(0, 1 + dx, dx)
+        self.bins = bins
+
+    @property
+    def bins(self):
+        """
+        The grid spacing. Assumed to be equal for all three dimensions. Units
+        ought to match the requested coordinates.
+
+        Returns
+        -------
+        bins : 1-dimensional array
+        """
+        return self._bins
+
+    @bins.setter
+    def bins(self, bins):
+        """Sets `bins`."""
+        bins = numpy.asarray(bins) if isinstance(bins, list) else bins
+        assert bins.ndim == 1, "`bins` must be a 1-dimensional array."
+        self._bins = bins
+
+    def assign_to_cell(self, x, y, z):
+        """
+        Assign particles specified by coordinates `x`, `y`, and `z` to grid
+        cells.
+
+        Parameters
+        ----------
+        x, y, z : 1-dimensional arrays
+            Positions of particles in the box.
+
+        Returns
+        -------
+        cells : 1-dimensional array
+            Cell ID of each particle.
+        """
+        assert x.ndim == 1 and x.size == y.size == z.size
+        xbin = numpy.digitize(x, self.bins)
+        ybin = numpy.digitize(y, self.bins)
+        zbin = numpy.digitize(z, self.bins)
+        N = self.bins.size
+
+        return xbin + ybin * N + zbin * N**2
+
+    def mass_overlap(self, clump1, clump2, cells1=None):
+        r"""
+        Calculate the particle, mass-weighted overlap between two halos.
+        Defined as
+
+        ..math::
+            (M_{u,1} + M_{u,2}) / (M_1 + M_2),
+
+        where :math:`M_{u, 1}` is the mass of particles of the first halo in
+        cells that are also present in the second halo and :math:`M_1` is the
+        total particle mass of the first halo.
+
+        Parameters
+        ----------
+        clump1, clump2 : structured arrays
+            Structured arrays corresponding to the two clumps. Should contain
+            keys `x`, `y`, `z` and `M`.
+        cells1 : 1-dimensional array, optional
+            Optionlaly precomputed cells of `clump1`. Be careful when using
+            this to ensure it matches `clump1`.
+
+        Returns
+        -------
+        overlap : float
+        """
+        # 1-dimensional cell ID of each particle in clump1 and clump2
+        if cells1 is None:
+            cells1 = self.assign_to_cell(*[clump1[p] for p in ('x', 'y', 'z')])
+        cells2 = self.assign_to_cell(*[clump2[p] for p in ('x', 'y', 'z')])
+        # Elementwise cells1 in cells2 and vice versa
+        m1 = numpy.isin(cells1, cells2)
+        m2 = numpy.isin(cells2, cells1)
+        # Summed shared mass and the total
+        interp = numpy.sum(clump1["M"][m1]) + numpy.sum(clump2["M"][m2])
+        mtot = numpy.sum(clump1["M"]) + numpy.sum(clump2["M"])
+
+        return interp / mtot

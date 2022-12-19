@@ -7,14 +7,11 @@
 
 
 ## Short-term TODO
-- [x] Add code to calculate the cross-correlation for resolved region only.
-- [ ] Calculate the spectra for all 101 boxes and visualise them.
-- [ ] See about the $z=70$ particles.
+- [ ] Implement the CIC binning.
+- [ ] Write a script to perform the matching on a node.
 
 
 ## Long-term TODO
-- [ ] Calculate the cross-correlation in CSiBORG. Should see the scale of the constraints?
-- [ ] Find the distribution of particles in the first snapshot
 - [ ] Implement a custom model for matchin galaxies to halos.
 
 
