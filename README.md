@@ -1,20 +1,33 @@
 # CSiBORG tools
 
-## Questions to answer
+## CSiBORG Matching
+
+### TODO
+- [ ] Implement CIC binning or an alternative scheme for nearby objects.
+- [ ] Write a script to perform the matching on a node.
+- [ ] Consistently locate region spanned by a single halo.
+
+### Questions
+- What scaling of the search region? No reason for it to be a multiple of $R_{200c}$.
 - How well can observed clusters be matched to CSiBORG? Do their masses agree?
 - Is the number of clusters in CSiBORG consistent?
-- Are any observed clusters suspiciously missing in CSiBORG?
 
 
-## Short-term TODO
-- [ ] Implement the CIC binning.
-- [ ] Write a script to perform the matching on a node.
+## CSiBORG Galaxy Environmental Dependence
+
+### TODO
+- [ ] Add gradient and Hessian of the overdensity field.
+- [ ] Write a script to smoothen an overdensity field, calculate the derived fields and evaluate them at the galaxy positions.
 
 
-## Long-term TODO
-- [ ] Implement a custom model for matchin galaxies to halos.
+### Questions
+- Environmental dependence of:
+  - $M_*$, colour and SFR.
+  - Galaxy alignment.
+  - HI content.
 
-
-## Open questions
-- What scaling of the search region? No reason for it to be a multiple of $R_{200c}$.
-- Begin extracting the DM environmental properties at galaxy positions?
+- Fields to calculate:
+    1. Overdensity field $\delta$
+    2. Gradient and Hessian of $\delta$
+    3. Gravitational field $\Phi$
+    4. Gradient and Hessian of $\Phi$
