@@ -5,8 +5,8 @@
 ### TODO
 - [x] Implement CIC binning or an alternative scheme for nearby objects.
 - [x] Consistently locate region spanned by a single halo.
-- [ ] Write a script to perform the matching on a node.
-- [ ] Make a coarser grid for halos outside of the well resolved region.
+- [x] Write a script to perform the matching on a node.
+- [x] Make a coarser grid for halos outside of the well resolved region.
 
 ### Questions
 - What scaling of the search region? No reason for it to be a multiple of $R_{200c}$.
