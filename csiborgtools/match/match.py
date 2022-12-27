@@ -14,8 +14,11 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import numpy
+from scipy.ndimage import gaussian_filter
+from math import ceil
 from tqdm import (tqdm, trange)
 from astropy.coordinates import SkyCoord
+import MAS_library as MASL
 from ..read import CombinedHaloCatalogue
 
 
@@ -79,9 +82,6 @@ class RealisationsMatcher:
     ----------
     cats : :py:class`csiborgtools.read.CombinedHaloCatalogue`
         Combined halo catalogue to search.
-    # NOTE add later
-#    dtype : dtype, optional
-#        Output precision. By default `numpy.float32`.
     """
     _cats = None
 
@@ -156,7 +156,8 @@ class RealisationsMatcher:
 
     def cross_knn_position_single(self, n_sim, nmult=5, dlogmass=None,
                                   mass_kind="totpartmass", init_dist=False,
-                                  overlap=False, verbose=True):
+                                  overlap=False, overlapper_kwargs={},
+                                  verbose=True):
         r"""
         Find all neighbours within :math:`n_{\rm mult} R_{200c}` of halos in
         the `nsim`th simulation. Also enforces that the neighbours'
@@ -183,6 +184,8 @@ class RealisationsMatcher:
             Whether to calculate overlap between clumps in the initial
             snapshot. By default `False`. Note that this operation is
             substantially slower.
+        overlapper_kwargs : dict, optional
+            Keyword arguments passed to `ParticleOverlapper`.
         verbose : bool, optional
             Iterator verbosity flag. By default `True`.
 
@@ -196,9 +199,6 @@ class RealisationsMatcher:
             `overlap` is the overlap over the initial clumps, all respectively.
             The latter two are calculated only if `init_dist` or `overlap` is
             `True`.
-
-        TODO:
-        - [ ] Precalculate the mapping from halo index to clump array position
         """
         self._check_masskind(mass_kind)
         # Radius, mass and positions of halos in `n_sim` IC realisation
@@ -215,7 +215,7 @@ class RealisationsMatcher:
             paths = self.cats[0].paths
             with open(paths.clump0_path(self.cats.n_sims[n_sim]), "rb") as f:
                 clumps0 = numpy.load(f, allow_pickle=True)
-            overlapper = ParticleOverlap()
+            overlapper = ParticleOverlap(**overlapper_kwargs)
             cat2clumps0 = self._cat2clump_mapping(self.cats[n_sim]["index"],
                                                   clumps0["ID"])
 
@@ -254,6 +254,11 @@ class RealisationsMatcher:
                           "to compare against `n_sim = {}`.".format(i, n_sim))
                 with open(paths.clump0_path(self.cats.n_sims[i]), 'rb') as f:
                     clumpsx = numpy.load(f, allow_pickle=True)
+
+                # Switch overlapper resolution if halo outside well-def region
+                is_high = self.cats[n_sim]["dist"] < 155.5 / 0.705
+                overlapper.cellsize = 1 / 2**11 if is_high else 1 / 2**8
+
                 cat2clumpsx = self._cat2clump_mapping(self.cats[i]["index"],
                                                       clumpsx["ID"])
 
@@ -265,16 +270,13 @@ class RealisationsMatcher:
 
                     # Get the clump and pre-calculate its cell assignment
                     cl0 = clumps0["clump"][match0]
-                    cl0_cells = overlapper.assign_to_cell(
-                        *(cl0[p] for p in ('x', 'y', 'z')))
                     dint = numpy.full(indxs[k].size, numpy.nan, numpy.float64)
 
                     # Loop over the ones we cross-correlate with
                     for ii, ind in enumerate(indxs[k]):
                         # Again which cross clump to this index
                         matchx = cat2clumpsx[ind]
-                        dint[ii] = overlapper.mass_overlap(
-                            cl0, clumpsx["clump"][matchx], cl0_cells)
+                        dint[ii] = overlapper(cl0, clumpsx["clump"][matchx])
 
                     cross[k] = dint
 
@@ -286,7 +288,8 @@ class RealisationsMatcher:
 
     def cross_knn_position_all(self, nmult=5, dlogmass=None,
                                mass_kind="totpartmass", init_dist=False,
-                               overlap=False, verbose=True):
+                               overlap=False, overlapper_kwargs={},
+                               verbose=True):
         r"""
         Find all neighbours within :math:`n_{\rm mult} R_{200c}` of halos in
         all simulations listed in `self.cats`. Also enforces that the
@@ -310,6 +313,8 @@ class RealisationsMatcher:
             Whether to calculate overlap between clumps in the initial
             snapshot. By default `False`. Note that this operation is
             substantially slower.
+        overlapper_kwargs : dict, optional
+            Keyword arguments passed to `ParticleOverlapper`.
         verbose : bool, optional
             Iterator verbosity flag. By default `True`.
 
@@ -325,7 +330,8 @@ class RealisationsMatcher:
         for i in trange(N) if verbose else range(N):
             matches[i] = self.cross_knn_position_single(
                 i, nmult, dlogmass, mass_kind=mass_kind, init_dist=init_dist,
-                overlap=overlap, verbose=verbose)
+                overlap=overlap, overlapper_kwargs=overlapper_kwargs,
+                verbose=verbose)
         return matches
 
 
@@ -366,94 +372,200 @@ def cosine_similarity(x, y):
 
 
 class ParticleOverlap:
-    """
-    TODO:
-    - [ ] Class documentation
-    """
-    _bins = None
+    r"""
+    Class to calculate overlap between two halos from different simulations.
 
-    def __init__(self, bins=None):
-        if bins is None:
-            dx = 1 / 2**11
-            bins = numpy.arange(0, 1 + dx, dx)
-        self.bins = bins
+    Parameters
+    ----------
+    cellsize : float, optional
+        Cellsize in box units. By default :math:`1 / 2^11`, which matches the
+        initial RAMSES grid resolution.
+    smooth_scale : float or integer, optional
+        Optional Gaussian smoothing scale to by applied to the fields. By
+        default no smoothing is applied. Otherwise the scale is to be
+        specified in the number of cells (i.e. in units of `self.cellsize`).
+    MAS : str, optional
+        The mass assignment scheme to a grid. By default `PCS`.
+    """
+    _cellsize = None
+    _smooth_scale = None
+    _MAS = None
+
+    def __init__(self, cellsize=1/2**11, smooth_scale=None, MAS="PCS"):
+        self.cellsize = cellsize
+        self.smooth_scale = smooth_scale
+        self.MAS = MAS
 
     @property
-    def bins(self):
+    def cellsize(self):
         """
-        The grid spacing. Assumed to be equal for all three dimensions. Units
-        ought to match the requested coordinates.
+        The grid cubical cell size.
 
         Returns
         -------
-        bins : 1-dimensional array
+        cellsize: 1-dimensional array
         """
-        return self._bins
+        return self._cellsize
 
-    @bins.setter
-    def bins(self, bins):
-        """Sets `bins`."""
-        bins = numpy.asarray(bins) if isinstance(bins, list) else bins
-        assert bins.ndim == 1, "`bins` must be a 1-dimensional array."
-        self._bins = bins
+    @cellsize.setter
+    def cellsize(self, cellsize):
+        """Sets `cellsize`."""
+        assert cellsize > 0, "`cellsize` must be positive."
+        self._cellsize = cellsize
 
-    def assign_to_cell(self, x, y, z):
+    @property
+    def smooth_scale(self):
         """
-        Assign particles specified by coordinates `x`, `y`, and `z` to grid
-        cells.
+        The smoothing scale in units of `self.cellsize`. If not set `None`.
+
+        Returns
+        -------
+        smooth_scale : int or float
+        """
+        return self._smooth_scale
+
+    @smooth_scale.setter
+    def smooth_scale(self, smooth_scale):
+        """Sets `smooth_scale`."""
+        if smooth_scale is not None:
+            assert smooth_scale > 0
+            self._smooth_scale = smooth_scale
+
+    @property
+    def MAS(self):
+        """
+        Mass assignment scheme.
+
+        Returns
+        -------
+        MAS : str
+        """
+        return self._MAS
+
+    @MAS.setter
+    def MAS(self, MAS):
+        """
+        Set `MAS`, checking it's a good value.
+        """
+        assert MAS in ["NGP", "CIC", "TSC", "PCS"]
+        self._MAS = MAS
+
+    @staticmethod
+    def _minmax(X1, X2):
+        """
+        Calculate the minimum and maximum coordinates from both arrays.
 
         Parameters
         ----------
-        x, y, z : 1-dimensional arrays
-            Positions of particles in the box.
+        X1, X2 : 2-dimensional arrays of shape (n_samples, 3)
+            Cartesian coordinates of samples.
 
         Returns
         -------
-        cells : 1-dimensional array
-            Cell ID of each particle.
+        mins, maxs : 1-dimensional arrays
+            Arrays of minima and maxima.
         """
-        assert x.ndim == 1 and x.size == y.size == z.size
-        xbin = numpy.digitize(x, self.bins)
-        ybin = numpy.digitize(y, self.bins)
-        zbin = numpy.digitize(z, self.bins)
-        N = self.bins.size
+        # Calculate minimas for X1, X2
+        mins1 = numpy.min(X1, axis=0)
+        mins2 = numpy.min(X2, axis=0)
+        # Where X2 less than X1 replace the minima, we want min of both arrs
+        # and will return mins1!
+        m = mins2 < mins1
+        mins1[m] = mins2[m]
 
-        return xbin + ybin * N + zbin * N**2
+        # Repeat for maximas
+        maxs1 = numpy.max(X1, axis=0)
+        maxs2 = numpy.max(X2, axis=0)
+        # Where X2 less than X1 replace the minima, we want min of both arrs
+        m = maxs2 > maxs1
+        maxs1[m] = maxs2[m]
 
-    def mass_overlap(self, clump1, clump2, cells1=None):
+        return mins1, maxs1
+
+    def make_deltas(self, clump1, clump2):
+        """
+        Calculate density fields of two halos on a grid that encloses them.
+
+        Parameters
+        ----------
+        clump1, clump2 : structurered arrays
+            Structured arrays containing the particles of a given clump. Keys
+            must include `x`, `y`, `z` and `M`.
+
+        Returns
+        -------
+        delta1, delta2 : 3-dimensional arrays
+            Density arrays of `clump1` and `clump2`, respectively.
+        """
+        # Turn structured arrays to 2-dim arrs
+        X1 = numpy.vstack([clump1[p] for p in ('x', 'y', 'z')]).T
+        X2 = numpy.vstack([clump2[p] for p in ('x', 'y', 'z')]).T
+
+        # Calculate where to place box boundaries
+        mins, maxs = self._minmax(X1, X2)
+
+        # Rescale X1 and X2
+        X1 -= mins
+        X1 /= maxs - mins
+
+        X2 -= mins
+        X2 /= maxs - mins
+
+        # How many cells in a subcube along each direction
+        width = numpy.max(maxs - mins)
+        ncells = ceil(width / self.cellsize)
+
+        # Assign particles to the grid now
+        delta1 = numpy.zeros((ncells, ncells, ncells), dtype=numpy.float32)
+        delta2 = numpy.zeros_like(delta1)
+
+        # Now do MAS
+        MASL.MA(X1, delta1, 1., self.MAS, verbose=False, W=clump1["M"])
+        MASL.MA(X2, delta2, 1., self.MAS, verbose=False, W=clump2["M"])
+
+        if self.smooth_scale is not None:
+            delta1 = gaussian_filter(delta1, self.smooth_scale, output=delta1)
+            delta2 = gaussian_filter(delta2, self.smooth_scale, output=delta2)
+
+        return delta1, delta2
+
+    @staticmethod
+    def overlap(delta1, delta2):
         r"""
-        Calculate the particle, mass-weighted overlap between two halos.
-        Defined as
-
-        ..math::
-            (M_{u,1} + M_{u,2}) / (M_1 + M_2),
-
-        where :math:`M_{u, 1}` is the mass of particles of the first halo in
-        cells that are also present in the second halo and :math:`M_1` is the
-        total particle mass of the first halo.
+        Overlap between two density grids.
 
         Parameters
         ----------
-        clump1, clump2 : structured arrays
-            Structured arrays corresponding to the two clumps. Should contain
-            keys `x`, `y`, `z` and `M`.
-        cells1 : 1-dimensional array, optional
-            Optionlaly precomputed cells of `clump1`. Be careful when using
-            this to ensure it matches `clump1`.
+        delta1, delta2 : 3-dimensional arrays
+            Density arrays.
 
         Returns
         -------
         overlap : float
         """
-        # 1-dimensional cell ID of each particle in clump1 and clump2
-        if cells1 is None:
-            cells1 = self.assign_to_cell(*[clump1[p] for p in ('x', 'y', 'z')])
-        cells2 = self.assign_to_cell(*[clump2[p] for p in ('x', 'y', 'z')])
-        # Elementwise cells1 in cells2 and vice versa
-        m1 = numpy.isin(cells1, cells2)
-        m2 = numpy.isin(cells2, cells1)
-        # Summed shared mass and the total
-        interp = numpy.sum(clump1["M"][m1]) + numpy.sum(clump2["M"][m2])
-        mtot = numpy.sum(clump1["M"]) + numpy.sum(clump2["M"])
+        mass1 = numpy.sum(delta1)
+        mass2 = numpy.sum(delta2)
+        # Cells where both fields are > 0
+        mask = (delta1 > 0) & (delta2 > 0)
+        # Note the factor of 0.5 to avoid double counting
+        intersect = 0.5 * numpy.sum(delta1[mask] + delta2[mask])
+        return intersect / (mass1 + mass2 - intersect)
 
-        return interp / mtot
+    def __call__(self, clump1, clump2):
+        """
+        Calculate overlap between `clump1` and `clump2`. See
+        `self.overlap(...)` and `self.make_deltas(...)` for further
+        information.
+
+        Parameters
+        ----------
+        clump1, clump2 : structurered arrays
+            Structured arrays containing the particles of a given clump. Keys
+            must include `x`, `y`, `z` and `M`.
+
+        Returns
+        -------
+        overlap : float
+        """
+        delta1, delta2 = self.make_deltas(clump1, clump2)
+        return self.overlap(delta1, delta2)
