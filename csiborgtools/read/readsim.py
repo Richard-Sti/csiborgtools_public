@@ -18,12 +18,11 @@ Functions to read in the particle and clump files.
 
 import numpy
 from scipy.io import FortranFile
-import gc
 from os.path import (join, isfile, isdir)
 from glob import glob
 from tqdm import tqdm
 from warnings import warn
-from ..utils import (cols_to_structured, extract_from_structured)
+from ..utils import (cols_to_structured)
 
 
 F16 = numpy.float16
@@ -883,49 +882,31 @@ def read_initcm(n, srcdir, fname="clump_{}_cm.npy"):
         return None
 
 
-def get_positions(paths, get_clumpid, verbose=True):
+def halfwidth_select(hw, particles):
     """
-    Shortcut to get particle IDs, positions, masses and optionally clump
-    indices.
+    Select particles that in a cube of size `2 hw`, centered at the origin.
+    Note that this directly modifies the original array and throws away
+    particles outside the central region.
 
     Parameters
     ----------
-    paths : py:class`csiborgtools.read.CSiBORGPaths`
-        CSiBORG paths-handling object with set `n_sim` and `n_snap`.
-    get_clumpid : bool
-        Whether to also return the clump indices.
-    verbose : bool, optional
-        Verbosity flag. By default `True`.
+    hw : float
+        Central region halfwidth.
+    particles : structured array
+        Particle array with keys `x`, `y`, `z`.
 
     Returns
     -------
-    particle_ids : 1-dimensional array
-        Particle IDs of shape `(n_particles, )`.
-    particle_pos : 2-dimensional array
-        Particle box coordinates of shape `(n_particles, 3)`.
-    particle_mass : 1-dimensional array
-        Particle mass of shape `(n_particles, )`.
-    clump_ids : 1-dimensional array, optional
-        Particles' clump IDs of shape `(n_particles, )`. Returned only if
-        `get_clumpid` is `True`.
+    particles : structured array
+        The modified particle array.
     """
-    # Extract particles
-    reader = ParticleReader(paths)
-    pars_extract = ["ID", "x", "y", "z", "M"]
-
-    # Read particles and unpack
-    particles = reader.read_particle(pars_extract, verbose)
-    pids = extract_from_structured(particles, "ID")
-    ppos = extract_from_structured(particles, ["x", "y", "z"])
-    pmass = extract_from_structured(particles, "M")
-
-    # Force early memory release
-    del particles
-    gc.collect()
-
-    out = (pids, ppos, pmass)
-
-    if get_clumpid:
-        out += (reader.read_clumpid(verbose),)
-
-    return out
+    assert 0 < hw < 0.5
+    mask = ((0.5 - hw < particles['x']) & (particles['x'] < 0.5 + hw)
+            & (0.5 - hw < particles['y']) & (particles['y'] < 0.5 + hw)
+            & (0.5 - hw < particles['z']) & (particles['z'] < 0.5 + hw))
+    # Subselect the particles
+    particles = particles[mask]
+    # Rescale to range [0, 1]
+    for p in ('x', 'y', 'z'):
+        particles[p] = (particles[p] - 0.5 + hw) / (2 * hw)
+    return particles

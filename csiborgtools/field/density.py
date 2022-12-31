@@ -139,7 +139,7 @@ class DensityField:
             x = x.astype(numpy.float32)
         return x
 
-    def density_field(self, grid, verbose=True):
+    def density_field(self, grid, smooth_scale=None, verbose=True):
         """
         Calculate the density field using a Pylians routine [1, 2]. Enforces
         float32 precision.
@@ -148,6 +148,9 @@ class DensityField:
         ----------
         grid : int
             The grid size.
+        smooth_scale : float, optional
+            Scale to smoothen the density field, in units matching
+            `self.boxsize`. By default `None`, i.e. no smoothing is applied.
         verbose : float, optional
             A verbosity flag. By default `True`.
 
@@ -170,9 +173,11 @@ class DensityField:
         # Pre-allocate and do calculations
         rho = numpy.zeros((grid, grid, grid), dtype=numpy.float32)
         MASL.MA(pos, rho, self.boxsize, self.MAS, W=weights, verbose=verbose)
+        if smooth_scale is not None:
+            rho = self.smooth_field(rho, smooth_scale)
         return rho
 
-    def overdensity_field(self, grid, verbose=True):
+    def overdensity_field(self, grid, smooth_scale=None, verbose=True):
         r"""
         Calculate the overdensity field using Pylians routines.
         Defined as :math:`\rho/ <\rho> - 1`.
@@ -181,6 +186,9 @@ class DensityField:
         ----------
         grid : int
             The grid size.
+        smooth_scale : float, optional
+            Scale to smoothen the density field, in units matching
+            `self.boxsize`. By default `None`, i.e. no smoothing is applied.
         verbose : float, optional
             A verbosity flag. By default `True`.
 
@@ -190,12 +198,12 @@ class DensityField:
             Overdensity field.
         """
         # Get the overdensity
-        delta = self.density_field(grid, verbose)
+        delta = self.density_field(grid, smooth_scale, verbose)
         delta /= delta.mean()
         delta -= 1
         return delta
 
-    def potential_field(self, grid, verbose=True):
+    def potential_field(self, grid, smooth_scale=None, verbose=True):
         """
         Calculate the potential field using Pylians routines.
 
@@ -203,6 +211,9 @@ class DensityField:
         ----------
         grid : int
             The grid size.
+        smooth_scale : float, optional
+            Scale to smoothen the original density field, in units matching
+            `self.boxsize`. By default `None`, i.e. no smoothing is applied.
         verbose : float, optional
             A verbosity flag. By default `True`.
 
@@ -211,42 +222,24 @@ class DensityField:
         potential : 3-dimensional array of shape `(grid, grid, grid)`.
             Potential field.
         """
-        delta = self.overdensity_field(grid, verbose)
+        delta = self.overdensity_field(grid, smooth_scale, verbose)
         if verbose:
             print("Calculating potential from the overdensity..")
         return MASL.potential(
             delta, self.box._omega_m, self.box._aexp, self.MAS)
 
-    def tensor_field(self, grid, verbose=True):
+    def gravitational_field(self, grid, smooth_scale=None, verbose=True):
         """
-        Calculate the tidal tensor field.
+        Calculate the gravitational vector field. Note that this method is
+        only defined in a fork of `Pylians`.
 
         Parameters
         ----------
         grid : int
             The grid size.
-        verbose : float, optional
-            A verbosity flag. By default `True`.
-
-        Returns
-        -------
-        tidal_tensor : :py:class:`MAS_library.tidal_tensor`
-            Tidal tensor object, whose attributes `tidal_tensor.Tij` contain
-            the relevant tensor components.
-        """
-        delta = self.overdensity_field(grid, verbose)
-        return MASL.tidal_tensor(
-            delta, self.box._omega_m, self.box._aexp, self.MAS)
-
-    def gravitational_field(self, grid, verbose=True):
-        """
-        Calculate the gravitational tensor field. Note that this method is
-        only defined in fork of `Pylians`.
-
-        Parameters
-        ----------
-        grid : int
-            The grid size.
+        smooth_scale : float, optional
+            Scale to smoothen the original density field, in units matching
+            `self.boxsize`. By default `None`, i.e. no smoothing is applied.
         verbose : float, optional
             A verbosity flag. By default `True`.
 
@@ -256,11 +249,35 @@ class DensityField:
             Tidal tensor object, whose attributes `grav_field_tensor.gi`
             contain the relevant tensor components.
         """
-        delta = self.overdensity_field(grid, verbose)
+        delta = self.overdensity_field(grid, smooth_scale, verbose)
         return MASL.grav_field_tensor(
             delta, self.box._omega_m, self.box._aexp, self.MAS)
 
-    def auto_powerspectrum(self, grid, verbose=True):
+    def tensor_field(self, grid, smooth_scale=None, verbose=True):
+        """
+        Calculate the tidal tensor field.
+
+        Parameters
+        ----------
+        grid : int
+            The grid size.
+        smooth_scale : float, optional
+            Scale to smoothen the original density field, in units matching
+            `self.boxsize`. By default `None`, i.e. no smoothing is applied.
+        verbose : float, optional
+            A verbosity flag. By default `True`.
+
+        Returns
+        -------
+        tidal_tensor : :py:class:`MAS_library.tidal_tensor`
+            Tidal tensor object, whose attributes `tidal_tensor.Tij` contain
+            the relevant tensor components.
+        """
+        delta = self.overdensity_field(grid, smooth_scale, verbose)
+        return MASL.tidal_tensor(
+            delta, self.box._omega_m, self.box._aexp, self.MAS)
+
+    def auto_powerspectrum(self, grid, smooth_scale, verbose=True):
         """
         Calculate the auto 1-dimensional power spectrum.
 
@@ -268,6 +285,9 @@ class DensityField:
         ----------
         grid : int
             The grid size.
+        smooth_scale : float, optional
+            Scale to smoothen the original density field, in units matching
+            `self.boxsize`. By default `None`, i.e. no smoothing is applied.
         verbose : float, optional
             A verbosity flag. By default `True`.
 
@@ -276,7 +296,7 @@ class DensityField:
         pk : py:class`Pk_library.Pk`
             Power spectrum object.
         """
-        delta = self.overdensity_field(grid, verbose)
+        delta = self.overdensity_field(grid, smooth_scale, verbose)
         return PKL.Pk(
             delta, self.boxsize, axis=1, MAS=self.MAS, threads=1,
             verbose=verbose)
@@ -305,48 +325,51 @@ class DensityField:
         W_k = SL.FT_filter(self.boxsize, scale, grid, Filter, threads)
         return SL.field_smoothing(field, W_k, threads)
 
-    def evaluate_field(self, pos, field):
+    def evaluate_field(self, *field, pos):
         """
         Evaluate the field at Cartesian coordinates.
 
         Parameters
         ----------
+        field : (list of) 3-dimensional array of shape `(grid, grid, grid)`
+            The density field that is to be interpolated.
         pos : 2-dimensional array of shape `(n_samples, 3)`
             Positions to evaluate the density field. The coordinates span range
             of [0, boxsize].
-        field : 3-dimensional array of shape `(grid, grid, grid)`
-            The density field that is to be interpolated.
 
         Returns
         -------
-        interp_field : 1-dimensional array of shape `(n_samples,).
-            Interpolated field at `pos`.
+        interp_field : (list of) 1-dimensional array of shape `(n_samples,).
+            Interpolated fields at `pos`.
         """
         self._force_f32(pos, "pos")
-        density_interpolated = numpy.zeros(pos.shape[0], dtype=numpy.float32)
-        MASL.CIC_interp(field, self.boxsize, pos, density_interpolated)
-        return density_interpolated
 
-    def evaluate_sky(self, pos, field, isdeg=True):
+        interp_field = [numpy.zeros(pos.shape[0], dtype=numpy.float32)
+                        for __ in range(len(field))]
+        for i, f in enumerate(field):
+            MASL.CIC_interp(f, self.boxsize, pos, interp_field[i])
+        return interp_field
+
+    def evaluate_sky(self, *field, pos, isdeg=True):
         """
         Evaluate the field at given distance, right ascension and declination.
         Assumes that the observed is in the centre of the box.
 
         Parameters
         ----------
+        field : (list of) 3-dimensional array of shape `(grid, grid, grid)`
+            The density field that is to be interpolated. Assumed to be defined
+            on a Cartesian grid.
         pos : 2-dimensional array of shape `(n_samples, 3)`
             Spherical coordinates to evaluate the field. Should be distance,
             right ascension, declination, respectively.
-        field : 3-dimensional array of shape `(grid, grid, grid)`
-            The density field that is to be interpolated. Assumed to be defined
-            on a Cartesian grid.
         isdeg : bool, optional
             Whether `ra` and `dec` are in degres. By default `True`.
 
         Returns
         -------
-        interp_field : 1-dimensional array of shape `(n_samples,).
-            Interpolated field at `pos`.
+        interp_field : (list of) 1-dimensional array of shape `(n_samples,).
+            Interpolated fields at `pos`.
         """
         self._force_f32(pos, "pos")
         X = numpy.vstack(
@@ -354,7 +377,58 @@ class DensityField:
         X = X.astype(numpy.float32)
         # Place the observer at the center of the box
         X += 0.5 * self.boxsize
-        return self.evaluate_field(X, field)
+        return self.evaluate_field(*field, pos=X)
+
+    @staticmethod
+    def gravitational_field_norm(gx, gy, gz):
+        """
+        Calculate the norm (magnitude) of a gravitational field.
+
+        Parameters
+        ----------
+        gx, gy, gz : 1-dimensional arrays of shape `(n_samples,)`
+            Gravitational field components.
+
+        Returns
+        -------
+        g : 1-dimensional array of shape `(n_samples,)`
+            Gravitational field norm.
+        """
+        return numpy.sqrt(gx * gx + gy * gy + gz * gz)
+
+    @staticmethod
+    def tensor_field_eigvals(T00, T01, T02, T11, T12, T22):
+        """
+        Calculate the eigenvalues of a symmetric tensor field. Eigenvalues are
+        sorted in increasing order.
+
+        Parameters
+        ----------
+        T00, T01, T02, T11, T12, T22 : 1-dim arrays of shape `(n_samples,)`
+            Tensor field upper components evaluated for each sample.
+
+        Returns
+        -------
+        eigvals : 2-dimensional array of shape `(n_samples, 3)`
+            Eigenvalues of each sample.
+        """
+        n_samples = T00.size
+        # Fill array of shape `(n_samples, 3, 3)` to calculate eigvals
+        Teval = numpy.full((n_samples, 3, 3), numpy.nan, dtype=numpy.float32)
+        Teval[:, 0, 0] = T00
+        Teval[:, 0, 1] = T01
+        Teval[:, 0, 2] = T02
+        Teval[:, 1, 1] = T11
+        Teval[:, 1, 2] = T12
+        Teval[:, 2, 2] = T22
+
+        # Calculate the eigenvalues
+        eigvals = numpy.full((n_samples, 3), numpy.nan, dtype=numpy.float32)
+        for i in range(n_samples):
+            eigvals[i, :] = numpy.linalg.eigvalsh(Teval[i, ...], 'U')
+            eigvals[i, :] = numpy.sort(eigvals[i, :])
+
+        return eigvals
 
     def make_sky_map(self, ra, dec, field, dist_marg, isdeg=True,
                      verbose=True):
@@ -363,6 +437,8 @@ class DensityField:
         the box and evaluates the field in directions `ra`, `dec`. At each such
         position evaluates the field at distances `dist_marg` and sums these
         interpolated values of the field.
+
+        NOTE: Supports only scalar fields.
 
         Parameters
         ----------
@@ -400,6 +476,6 @@ class DensityField:
             dec_loop[:] = pos[i, 1]
             pos_loop[:] = numpy.vstack([dist_marg, ra_loop, dec_loop]).T
             # Evaluate and sum it up
-            out[i] = numpy.sum(self.evaluate_sky(pos_loop, field, isdeg))
+            out[i] = numpy.sum(self.evaluate_sky(field, pos_loop, isdeg)[0, :])
 
         return out
