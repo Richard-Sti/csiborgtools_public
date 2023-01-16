@@ -18,7 +18,7 @@ from scipy.ndimage import gaussian_filter
 from tqdm import (tqdm, trange)
 from astropy.coordinates import SkyCoord
 from numba import jit
-from ..read import CombinedHaloCatalogue
+from ..read import (CombinedHaloCatalogue, concatenate_clumps)
 
 
 def brute_spatial_separation(c1, c2, angular=False, N=None, verbose=False):
@@ -209,7 +209,7 @@ class RealisationsMatcher:
         if overlap:
             if verbose:
                 print("Loading initial clump particles for `n_sim = {}`."
-                      .format(n_sim))
+                      .format(n_sim), flush=True)
             # Grab a paths object. What it is set to is unimportant
             paths = self.cats[0].paths
             with open(paths.clump0_path(self.cats.n_sims[n_sim]), "rb") as f:
@@ -250,9 +250,18 @@ class RealisationsMatcher:
             if overlap:
                 if verbose:
                     print("Loading initial clump particles for `n_sim = {}` "
-                          "to compare against `n_sim = {}`.".format(i, n_sim))
+                          "to compare against `n_sim = {}`.".format(i, n_sim),
+                          flush=True)
                 with open(paths.clump0_path(self.cats.n_sims[i]), 'rb') as f:
                     clumpsx = numpy.load(f, allow_pickle=True)
+
+                # Calculate the particle field
+                if verbose:
+                    print("Loading and smoothing the crossed total field.",
+                          flush=True)
+                particles = concatenate_clumps(clumpsx)
+                delta = overlapper.make_delta(particles, to_smooth=False)
+                delta = overlapper.smooth_highres(delta)
 
                 cat2clumpsx = self._cat2clump_mapping(self.cats[i]["index"],
                                                       clumpsx["ID"])
@@ -270,7 +279,8 @@ class RealisationsMatcher:
                     for ii, ind in enumerate(indxs[k]):
                         # Again which cross clump to this index
                         matchx = cat2clumpsx[ind]
-                        dint[ii] = overlapper(cl0, clumpsx["clump"][matchx])
+                        dint[ii] = overlapper(cl0, clumpsx["clump"][matchx],
+                                              delta)
 
                     cross[k] = dint
 
@@ -376,6 +386,9 @@ class ParticleOverlap:
     inv_clength : float, optional
         Inverse cell length in box units. By default :math:`2^11`, which
         matches the initial RAMSES grid resolution.
+    nshift : int, optional
+        Number of cells by which to shift the subbox from the outside-most
+        cell containing a particle. By default 5.
     smooth_scale : float or integer, optional
         Optional Gaussian smoothing scale to by applied to the fields. By
         default no smoothing is applied. Otherwise the scale is to be
@@ -384,10 +397,12 @@ class ParticleOverlap:
     _inv_clength = None
     _smooth_scale = None
     _clength = None
+    _nshift = None
 
-    def __init__(self, inv_clength=2**11, smooth_scale=None):
+    def __init__(self, inv_clength=2**11, smooth_scale=None, nshift=5):
         self.inv_clength = inv_clength
         self.smooth_scale = smooth_scale
+        self.nshift = nshift
 
     @property
     def inv_clength(self):
@@ -423,7 +438,9 @@ class ParticleOverlap:
     @smooth_scale.setter
     def smooth_scale(self, smooth_scale):
         """Sets `smooth_scale`."""
-        if smooth_scale is not None:
+        if smooth_scale is None:
+            self._smooth_scale = None
+        else:
             assert smooth_scale > 0
             self._smooth_scale = smooth_scale
 
@@ -443,7 +460,8 @@ class ParticleOverlap:
 
     def smooth_highres(self, delta):
         """
-        Smooth the central region of a full box density field.
+        Smooth the central region of a full box density field. Note that if
+        `self.smooth_scale` is `None` then quietly exits the function.
 
         Parameters
         ----------
@@ -454,7 +472,7 @@ class ParticleOverlap:
         smooth_delta : 3-dimensional arrray
         """
         if self.smooth_scale is None:
-            raise ValueError("`smooth_scale` is not set!")
+            return delta
         msg = "Shape of `delta` must match the entire box."
         assert delta.shape == (self._inv_clength,)*3, msg
 
@@ -490,10 +508,14 @@ class ParticleOverlap:
         xcell, ycell, zcell = (self.pos2cell(clump[p]) for p in coords)
         if subbox:
             # Shift the box so that each non-zero grid cell is 0th
-            xcell -= numpy.min(xcell)
-            ycell -= numpy.min(ycell)
-            zcell -= numpy.min(zcell)
-            ncells = max(*(numpy.max(p) for p in (xcell, ycell, zcell))) + 1
+            xcell -= max(numpy.min(xcell) - self.nshift, 0)
+            ycell -= max(numpy.min(ycell) - self.nshift, 0)
+            zcell -= max(numpy.min(zcell) - self.nshift, 0)
+
+            ncells = max(*(numpy.max(p) + self.nshift
+                           for p in (xcell, ycell, zcell)))
+            ncells += 1  # Bump up by one to get NUMBER of cells
+            ncells = min(ncells, self.inv_clength)
         else:
             ncells = self.inv_clength
 
@@ -528,9 +550,10 @@ class ParticleOverlap:
         xcell2, ycell2, zcell2 = (self.pos2cell(clump2[p]) for p in coords)
 
         # Minimum cell number of the two halos along each dimension
-        xmin = min(numpy.min(xcell1), numpy.min(xcell2))
-        ymin = min(numpy.min(ycell1), numpy.min(ycell2))
-        zmin = min(numpy.min(zcell1), numpy.min(zcell2))
+        xmin = min(numpy.min(xcell1), numpy.min(xcell2)) - self.nshift
+        ymin = min(numpy.min(ycell1), numpy.min(ycell2)) - self.nshift
+        zmin = min(numpy.min(zcell1), numpy.min(zcell2)) - self.nshift
+        xmin, ymin, zmin = max(xmin, 0), max(ymin, 0), max(zmin, 0)
         cellmins = (xmin, ymin, zmin)
         # Maximum cell number of the two halos along each dimension
         xmax = max(numpy.max(xcell1), numpy.max(xcell2))
@@ -538,7 +561,9 @@ class ParticleOverlap:
         zmax = max(numpy.max(zcell1), numpy.max(zcell2))
 
         # Number of cells is the maximum + 1
-        ncells = max(xmax - xmin, ymax - ymin, zmax - zmin) + 1
+        ncells = max(xmax - xmin, ymax - ymin, zmax - zmin) + self.nshift
+        ncells += 1
+        ncells = min(ncells, self.inv_clength)
 
         # Shift the box so that the first non-zero grid cell is 0th
         xcell1 -= xmin
@@ -579,10 +604,7 @@ class ParticleOverlap:
         -------
         overlap : float
         """
-        mass1 = numpy.sum(delta1)
-        mass2 = numpy.sum(delta2)
-        intersect = calc_intersect(delta1, delta2, cellmins, delta2_full)
-        return intersect / (mass1 + mass2 - intersect)
+        return _calculate_overlap(delta1, delta2, cellmins, delta2_full)
 
     def __call__(self, clump1, clump2, delta2_full):
         """
@@ -606,7 +628,7 @@ class ParticleOverlap:
         overlap : float
         """
         delta1, delta2, cellmins = self.make_deltas(clump1, clump2)
-        return self.overlap(delta1, delta2, cellmins, delta2_full)
+        return _calculate_overlap(delta1, delta2, cellmins, delta2_full)
 
 
 @jit(nopython=True)
@@ -633,40 +655,49 @@ def fill_delta(delta, xcell, ycell, zcell, weights):
 
 
 @jit(nopython=True)
-def calc_intersect(delta1, delta2, cellmins, delta2_full):
-    """
-    Calculate weighted intersect between two density fields.
+def _calculate_overlap(delta1, delta2, cellmins, delta2_full):
+    r"""
+    Overlap between two clumps whose density fields are evaluated on the
+    same grid. This is a JIT implementation, hence it is outside of the main
+    class.
 
     Parameters
     ----------
     delta1, delta2 : 3-dimensional arrays
-        Density fields of `clump1` and `clump2`, respectively.
+        Clumps density fields.
     cellmins : len-3 tuple
         Tuple of left-most cell ID in the full box.
     delta2_full : 3-dimensional array
-        Density field of the whole box calculated with particles assigned to
-        halos at zero redshift.
+        Density field of the whole box calculated with particles assigned
+        to halos at zero redshift.
 
     Returns
     -------
-    intersect : float
+    overlap : float
     """
     imax, jmax, kmax = delta1.shape
 
-    intersect = 0.
+    totmass = 0.    # Total mass of clump 1 and clump 2
+    intersect = 0.  # Mass of pixels that are non-zero in both clumps
+    weight = 0.     # Weight to account for other halos
+    count = 0       # Total number of pixels that are both non-zero
+
     for i in range(imax):
         ii = cellmins[0] + i
         for j in range(jmax):
             jj = cellmins[1] + j
             for k in range(kmax):
                 kk = cellmins[2] + k
-                # Unpack the densities of the clumps
+
                 cell1, cell2 = delta1[i, j, k], delta2[i, j, k]
+                totmass += cell1 + cell2
                 # If both are zero then skip
-                if not (cell1 > 0 and cell2 > 0):
-                    continue
+                if cell1 > 0 and cell2 > 0:
+                    intersect += cell1 + cell2
+                    weight += cell2 / delta2_full[ii, jj, kk]
+                    count += 1
 
-                weight = cell2 / delta2_full[ii, jj, kk]
-                intersect += 0.5 * weight * (cell1 + cell2)
-
-    return intersect
+    # Normalise the intersect and weights
+    intersect *= 0.5
+    weight = weight / count if count > 0 else 0.
+    return weight * intersect / (totmass - intersect)
