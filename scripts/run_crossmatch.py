@@ -19,7 +19,6 @@ import numpy
 from datetime import datetime
 from mpi4py import MPI
 from os.path import join
-from os import remove
 try:
     import csiborgtools
 except ModuleNotFoundError:
@@ -34,8 +33,8 @@ rank = comm.Get_rank()
 nproc = comm.Get_size()
 
 # File paths
-ftemp = join(utils.dumpdir, "temp_match", "match_{}.npy")
-fperm = join(utils.dumpdir, "match", "cross_matches.npy")
+fperm = join(utils.dumpdir, "overlap", "cross_{}.npy")
+# fperm = join(utils.dumpdir, "match", "cross_matches.npy")
 
 # Set up the catalogue
 paths = csiborgtools.read.CSiBORGPaths(to_new=False)
@@ -53,26 +52,16 @@ for i in csiborgtools.fits.split_jobs(len(cat.n_sims), nproc)[rank]:
     print("{}: rank {} working on simulation `{}`."
           .format(datetime.now(), rank, n), flush=True)
     out = matcher.cross_knn_position_single(
-        i, nmult=15, dlogmass=2, init_dist=True, overlap=True, verbose=False,
-        overlapper_kwargs={"smooth_scale": 0.5})
+        i, nmult=15, dlogmass=2, init_dist=True, overlap=False, verbose=False,
+        overlapper_kwargs={"smooth_scale": 1})
 
     # Dump the result
-    with open(ftemp.format(n), "wb") as f:
-        numpy.save(f, out)
+    fout = fperm.format(n)
+    print("Saving results to `{}`.".format(fout))
+    with open(fout, "wb") as f:
+        numpy.save(fout, out)
 
 
 comm.Barrier()
 if rank == 0:
-    print("Collecting files...", flush=True)
-
-    dtype = {"names": ["match", "nsim"], "formats": [object, numpy.int32]}
-    matches = numpy.full(len(cat.n_sims), numpy.nan, dtype=dtype)
-    for i, n in enumerate(cat.n_sims):
-        with open(ftemp.format(n), "rb") as f:
-            matches["match"][i] = numpy.load(f, allow_pickle=True)
-        matches["nsim"][i] = n
-        remove(ftemp.format(n))
-
-    print("Saving results to `{}`.".format(fperm))
-    with open(fperm, "wb") as f:
-        numpy.save(f, matches)
+    print("All finished.")
