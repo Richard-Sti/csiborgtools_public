@@ -43,6 +43,7 @@ class HaloCatalogue:
     _paths = None
     _data = None
     _knn = None
+    _knn0 = None
     _positions = None
     _positions0 = None
 
@@ -52,10 +53,14 @@ class HaloCatalogue:
         max_dist = numpy.infty if max_dist is None else max_dist
         self._paths = paths
         self._set_data(min_m500, max_dist)
-        # Initialise the KNN
+        # Initialise the KNN at z = 0 and at z = 70
         knn = NearestNeighbors()
         knn.fit(self.positions)
         self._knn = knn
+
+        knn0 = NearestNeighbors()
+        knn0.fit(self.positions0)
+        self._knn0 = knn0
 
     @property
     def data(self):
@@ -180,11 +185,25 @@ class HaloCatalogue:
         # Pre-allocate the positions arrays
         self._positions = numpy.vstack(
             [data["peak_{}".format(p)] for p in ("x", "y", "z")]).T
+        self._positions = self._positions.astype(numpy.float32)
         # And do the unit transform
         if initcm is not None:
-            data = self.box.convert_from_boxunits(data, ["x0", "y0", "z0"])
+            data = self.box.convert_from_boxunits(
+                data, ["x0", "y0", "z0", "patch_size"])
             self._positions0 = numpy.vstack(
                 [data["{}0".format(p)] for p in ("x", "y", "z")]).T
+            self._positions0 = self._positions0.astype(numpy.float32)
+
+        # Convert all that is not an integer to float32
+        names = list(data.dtype.names)
+        formats = []
+        for name in names:
+            if data[name].dtype.char in numpy.typecodes["AllInteger"]:
+                formats.append(numpy.int32)
+            else:
+                formats.append(numpy.float32)
+        dtype = numpy.dtype({"names": names, "formats": formats})
+        data = data.astype(dtype)
 
         self._data = data
 
@@ -238,10 +257,10 @@ class HaloCatalogue:
             raise ValueError(
                 "Ordering of `initcat` and `clumps` is inconsistent.")
 
-        X = numpy.full((clumps.size, 3), numpy.nan)
-        for i, p in enumerate(['x', 'y', 'z']):
+        X = numpy.full((clumps.size, 4), numpy.nan)
+        for i, p in enumerate(['x', 'y', 'z', "patch_size"]):
             X[:, i] = initcat[p]
-        return add_columns(clumps, X, ["x0", "y0", "z0"])
+        return add_columns(clumps, X, ["x0", "y0", "z0", "patch_size"])
 
     @property
     def positions(self):
@@ -317,7 +336,8 @@ class HaloCatalogue:
 
     def radius_neigbours(self, X, radius):
         """
-        Return sorted nearest neigbours within `radius` or `X`.
+        Return sorted nearest neigbours within `radius` of `X` in the final
+        snapshot.
 
         Parameters
         ----------
@@ -340,6 +360,33 @@ class HaloCatalogue:
             raise TypeError("`X` must be an array of shape `(n_samples, 3)`.")
         # Query the KNN
         return self._knn.radius_neighbors(X, radius, sort_results=True)
+
+    def radius_initial_neigbours(self, X, radius):
+        r"""
+        Return sorted nearest neigbours within `radius` or `X` in the initial
+        snapshot.
+
+        Parameters
+        ----------
+        X : 2-dimensional array
+            Array of shape `(n_queries, 3)`, where the latter axis represents
+            `x`, `y` and `z`.
+        radius : float
+            Limiting distance of neighbours.
+
+        Returns
+        -------
+        dist : list of 1-dimensional arrays
+            List of length `n_queries` whose elements are arrays of distances
+            to the nearest neighbours.
+        knns : list of 1-dimensional arrays
+            List of length `n_queries` whose elements are arrays of indices of
+            nearest neighbours in this catalogue.
+        """
+        if not (X.ndim == 2 and X.shape[1] == 3):
+            raise TypeError("`X` must be an array of shape `(n_samples, 3)`.")
+        # Query the KNN
+        return self._knn0.radius_neighbors(X, radius, sort_results=True)
 
     @property
     def keys(self):
@@ -462,8 +509,15 @@ def concatenate_clumps(clumps):
     N = 0
     for clump, __ in clumps:
         N += clump.size
+    # Infer dtype of positions
+    if clumps[0][0]['x'].dtype.char in numpy.typecodes["AllInteger"]:
+        posdtype = numpy.int32
+    else:
+        posdtype = numpy.float32
+
     # Pre-allocate array
-    dtype = {"names": ['x', 'y', 'z', "M"], "formats": [numpy.float32] * 4}
+    dtype = {"names": ['x', 'y', 'z', 'M'],
+             "formats": [posdtype] * 3 + [numpy.float32]}
     particles = numpy.full(N, numpy.nan, dtype)
 
     # Fill it one clump by another
@@ -475,3 +529,41 @@ def concatenate_clumps(clumps):
         start = end
 
     return particles
+
+
+def clumps_pos2cell(clumps, overlapper):
+    """
+    Convert clump positions directly to cell IDs. Useful to speed up subsequent
+    calculations. Overwrites the passed in arrays.
+
+    Parameters
+    ----------
+    clumps : array of arrays
+        Array of clump structured arrays whose `x`, `y`, `z` keys will be
+        converted.
+    overlapper : py:class:`csiborgtools.match.ParticleOverlapper`
+        `ParticleOverlapper` handling the cell assignment.
+
+    Returns
+    -------
+    None
+    """
+    # Check if clumps are probably already in cells
+    if any(clumps[0][0].dtype[p].char in numpy.typecodes["AllInteger"]
+           for p in ('x', 'y', 'z')):
+        raise ValueError("Positions appear to already be converted cells.")
+
+    # Get the new dtype that replaces float for int for positions
+    names = clumps[0][0].dtype.names  # Take the first one, doesn't matter
+    formats = [descr[1] for descr in clumps[0][0].dtype.descr]
+
+    for i in range(len(names)):
+        if names[i] in ('x', 'y', 'z'):
+            formats[i] = numpy.int32
+    dtype = numpy.dtype({"names": names, "formats": formats})
+
+    # Loop switch positions for cells IDs and change dtype
+    for n in range(clumps.size):
+        for p in ('x', 'y', 'z'):
+            clumps[n][0][p] = overlapper.pos2cell(clumps[n][0][p])
+        clumps[n][0] = clumps[n][0].astype(dtype)
