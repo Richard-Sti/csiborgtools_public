@@ -130,6 +130,28 @@ class HaloCatalogue:
         """
         return self.paths.n_sim
 
+    @property
+    def knn(self):
+        """
+        The final snapshot k-nearest neighbour object.
+
+        Returns
+        -------
+        knn : :py:class:`sklearn.neighbors.NearestNeighbors`
+        """
+        return self._knn
+
+    @property
+    def knn0(self):
+        """
+        The initial snapshot k-nearest neighbour object.
+
+        Returns
+        -------
+        knn : :py:class:`sklearn.neighbors.NearestNeighbors`
+        """
+        return self._knn0
+
     def _set_data(self, min_m500, max_dist):
         """
         Loads the data, merges with mmain, does various coordinate transforms.
@@ -189,7 +211,7 @@ class HaloCatalogue:
         # And do the unit transform
         if initcm is not None:
             data = self.box.convert_from_boxunits(
-                data, ["x0", "y0", "z0", "patch_size"])
+                data, ["x0", "y0", "z0", "lagpatch"])
             self._positions0 = numpy.vstack(
                 [data["{}0".format(p)] for p in ("x", "y", "z")]).T
             self._positions0 = self._positions0.astype(numpy.float32)
@@ -258,9 +280,9 @@ class HaloCatalogue:
                 "Ordering of `initcat` and `clumps` is inconsistent.")
 
         X = numpy.full((clumps.size, 4), numpy.nan)
-        for i, p in enumerate(['x', 'y', 'z', "patch_size"]):
+        for i, p in enumerate(['x', 'y', 'z', "lagpatch"]):
             X[:, i] = initcat[p]
-        return add_columns(clumps, X, ["x0", "y0", "z0", "patch_size"])
+        return add_columns(clumps, X, ["x0", "y0", "z0", "lagpatch"])
 
     @property
     def positions(self):
@@ -314,30 +336,10 @@ class HaloCatalogue:
         """
         return numpy.vstack([self["L{}".format(p)] for p in ("x", "y", "z")]).T
 
-    @property
-    def init_radius(self):
+    def radius_neigbours(self, X, radius, select_initial=True):
         r"""
-        A fiducial initial radius of particles that are identified as a single
-        halo in the final snapshot. Estimated to be
-
-        ..math:
-            R = (3 N / 4 \pi)^{1 / 3} * \Delta
-
-        where :math:`N` is the number of particles and `Delta` is the initial
-        inter-particular distance :math:`Delta = 1 / 2^{11}` in box units. The
-        output fiducial radius is in comoving units of Mpc.
-
-        Returns
-        -------
-        R : float
-        """
-        delta = self.box.box2mpc(1 / 2**11)
-        return (3 * self["npart"] / (4 * numpy.pi))**(1/3) * delta
-
-    def radius_neigbours(self, X, radius):
-        """
-        Return sorted nearest neigbours within `radius` of `X` in the final
-        snapshot.
+        Return sorted nearest neigbours within `radius` of `X` in the initial
+        or final snapshot.
 
         Parameters
         ----------
@@ -346,6 +348,9 @@ class HaloCatalogue:
             `x`, `y` and `z`.
         radius : float
             Limiting distance of neighbours.
+        select_initial : bool, optional
+            Whether to search for neighbours in the initial or final snapshot.
+            By default `True`, i.e. the final snapshot.
 
         Returns
         -------
@@ -358,35 +363,8 @@ class HaloCatalogue:
         """
         if not (X.ndim == 2 and X.shape[1] == 3):
             raise TypeError("`X` must be an array of shape `(n_samples, 3)`.")
-        # Query the KNN
-        return self._knn.radius_neighbors(X, radius, sort_results=True)
-
-    def radius_initial_neigbours(self, X, radius):
-        r"""
-        Return sorted nearest neigbours within `radius` or `X` in the initial
-        snapshot.
-
-        Parameters
-        ----------
-        X : 2-dimensional array
-            Array of shape `(n_queries, 3)`, where the latter axis represents
-            `x`, `y` and `z`.
-        radius : float
-            Limiting distance of neighbours.
-
-        Returns
-        -------
-        dist : list of 1-dimensional arrays
-            List of length `n_queries` whose elements are arrays of distances
-            to the nearest neighbours.
-        knns : list of 1-dimensional arrays
-            List of length `n_queries` whose elements are arrays of indices of
-            nearest neighbours in this catalogue.
-        """
-        if not (X.ndim == 2 and X.shape[1] == 3):
-            raise TypeError("`X` must be an array of shape `(n_samples, 3)`.")
-        # Query the KNN
-        return self._knn0.radius_neighbors(X, radius, sort_results=True)
+        knn = self.knn0 if select_initial else self.knn  # Pick the right KNN
+        return knn.radius_neighbors(X, radius, sort_results=True)
 
     @property
     def keys(self):
