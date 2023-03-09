@@ -18,6 +18,7 @@ Tools for summarising various results.
 import numpy
 import joblib
 from tqdm import tqdm
+from .make_cat import HaloCatalogue
 
 
 class PKReader:
@@ -170,16 +171,24 @@ class PKReader:
 
 class OverlapReader:
     """
-    TODO: docs
+    A shortcut object for reading in the results of matching two simulations.
 
+    Parameters
+    ----------
+    nsim0 : int
+        The reference simulation ID.
+    nsimx : int
+        The cross simulation ID.
+    fskel : str, optional
+        Path to the overlap. By default `None`, i.e.
+        `/mnt/extraspace/rstiskalek/csiborg/overlap/cross_{}_{}.npz`.
     """
-
-    def __init__(self, nsim0, nsimx, cat0, catx, fskel=None):
+    def __init__(self, nsim0, nsimx, fskel=None):
         if fskel is None:
             fskel = "/mnt/extraspace/rstiskalek/csiborg/overlap/"
             fskel += "cross_{}_{}.npz"
         self._data = numpy.load(fskel.format(nsim0, nsimx), allow_pickle=True)
-        self._set_cats(nsim0, nsimx, cat0, catx)
+        self._set_cats(nsim0, nsimx)
 
     @property
     def nsim0(self):
@@ -225,7 +234,7 @@ class OverlapReader:
         """
         return self._catx
 
-    def _set_cats(self, nsim0, nsimx, cat0, catx):
+    def _set_cats(self, nsim0, nsimx):
         """
         Set the simulation IDs and catalogues.
 
@@ -233,18 +242,15 @@ class OverlapReader:
         ----------
         nsim0, nsimx : int
             The reference and cross simulation IDs.
-        cat0, catx: :py:class:`csiborgtools.read.HaloCatalogue`
-            Halo catalogues corresponding to `nsim0` and `nsimx`, respectively.
 
         Returns
         -------
         None
         """
-        assert (nsim0 == cat0.paths.n_sim) & (nsimx == catx.paths.n_sim)
         self._nsim0 = nsim0
         self._nsimx = nsimx
-        self._cat0 = cat0
-        self._catx = catx
+        self._cat0 = HaloCatalogue(nsim0)
+        self._catx = HaloCatalogue(nsimx)
 
     @property
     def indxs(self):
@@ -351,16 +357,12 @@ class OverlapReader:
         Summed overlap of each halo in the reference simulation with the cross
         simulation.
 
-        Parameters
-        ----------
-        None
-
         Returns
         -------
         summed_overlap : 1-dimensional array of shape `(nhalos, )`
         """
-        return numpy.array([numpy.sum(cross) for cross in self._data["cross"]])
-    
+        return numpy.array([numpy.sum(cross) for cross in self.overlap])
+
     def copy_per_match(self, par):
         """
         Make an array like `self.match_indxs` where each of its element is an
@@ -371,7 +373,7 @@ class OverlapReader:
         ----------
         par : str
             Property to be copied over.
-        
+
         Returns
         -------
         out : 1-dimensional array of shape `(nhalos, )`
@@ -380,6 +382,80 @@ class OverlapReader:
         for n, ind in enumerate(self.match_indxs):
             out[n] = numpy.ones(ind.size) * self.cat0[par][n]
         return numpy.array(out, dtype=object)
+
+    def prob_nomatch(self):
+        """
+        Probability of no match for each halo in the reference simulation with
+        the cross simulation. Defined as a product of 1 - overlap with other
+        halos.
+
+        Returns
+        -------
+        out : 1-dimensional array of shape `(nhalos, )`
+        """
+        return numpy.array(
+            [numpy.product(1 - overlap) for overlap in self.overlap])
+
+    def expected_counterpart_mass(self, overlap_threshold=0., in_log=False,
+                                  mass_kind="totpartmass"):
+        """
+        Calculate the expected counterpart mass of each halo in the reference
+        simulation from the crossed simulation.
+
+        Parameters
+        -----------
+        overlap_threshold : float, optional
+            Minimum overlap required for a halo to be considered a match. By
+            default 0.0, i.e. no threshold.
+        in_log : bool, optional
+            Whether to calculate the expectation value in log space. By default
+            `False`.
+        mass_kind : str, optional
+            The mass kind whose ratio is to be calculated. Must be a valid
+            catalogue key. By default `totpartmass`, i.e. the total particle
+            mass associated with a halo.
+
+        Returns
+        -------
+        mean, std : 1-dimensional arrays of shape `(nhalos, )`
+        """
+        nhalos = self.indxs.size
+        mean = numpy.full(nhalos, numpy.nan)  # Preallocate output arrays
+        std = numpy.full(nhalos, numpy.nan)
+
+        massx = self.catx[mass_kind]  # Create references to the arrays here
+        overlap = self.overlap        # to speed up the loop below.
+
+        # Is the iterator verbose?
+        for n, match_ind in enumerate((self.match_indxs)):
+            # Skip if no match
+            if match_ind.size == 0:
+                continue
+
+            massx_ = massx[match_ind]  # Again just create references
+            overlap_ = overlap[n]      # to the appropriate elements
+
+            # Optionally apply overlap threshold
+            if overlap_threshold > 0.:
+                mask = overlap_ > overlap_threshold
+                if numpy.sum(mask) == 0:
+                    continue
+                massx_ = massx_[mask]
+                overlap_ = overlap_[mask]
+
+            massx_ = numpy.log10(massx_) if in_log else massx_
+            # Weighted average and *biased* standard deviation
+            mean_ = numpy.average(massx_, weights=overlap_)
+            std_ = numpy.average((massx_ - mean_)**2, weights=overlap_)**0.5
+
+            # If in log, convert back to linear
+            mean_ = 10**mean_ if in_log else mean_
+            std_ = mean_ * std_ * numpy.log(10) if in_log else std_
+
+            mean[n] = mean_
+            std[n] = std_
+
+        return mean, std
 
 
 def binned_resample_mean(x, y, prob, bins, nresample=50, seed=42):
@@ -401,7 +477,7 @@ def binned_resample_mean(x, y, prob, bins, nresample=50, seed=42):
         Number of MC resamples. By default 50.
     seed : int, optional
         Random seed.
-    
+
     Returns
     -------
     bin_centres : 1-dimensional array
@@ -413,8 +489,8 @@ def binned_resample_mean(x, y, prob, bins, nresample=50, seed=42):
 
     gen = numpy.random.RandomState(seed)
 
-    loop_stat = numpy.full(nresample, numpy.nan)      # Preallocate loop arr 
-    stat = numpy.full((bins.size - 1, 2), numpy.nan)  # Preallocate output 
+    loop_stat = numpy.full(nresample, numpy.nan)      # Preallocate loop arr
+    stat = numpy.full((bins.size - 1, 2), numpy.nan)  # Preallocate output
 
     for i in range(bins.size - 1):
         mask = (x > bins[i]) & (x <= bins[i + 1])
@@ -423,11 +499,10 @@ def binned_resample_mean(x, y, prob, bins, nresample=50, seed=42):
         loop_stat[:] = numpy.nan  # Clear it
         for j in range(nresample):
             loop_stat[j] = numpy.mean(y[mask][gen.rand(nsamples) < prob[mask]])
-        
+
         stat[i, 0] = numpy.mean(loop_stat)
         stat[i, 1] = numpy.std(loop_stat)
-    
+
     bin_centres = (bins[1:] + bins[:-1]) / 2
 
     return bin_centres, stat
-    
