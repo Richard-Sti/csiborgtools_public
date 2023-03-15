@@ -215,7 +215,7 @@ class RealisationsMatcher:
         mapping[ind2] = ind1
         return mapping
 
-    def cross(self, nsim0, nsimx,  cat0, catx, overlap=False, verbose=True):
+    def cross(self, cat0, catx, overlap=False, verbose=True):
         r"""
         Find all neighbours whose CM separation is less than `nmult` times the
         sum of their initial Lagrangian patch sizes. Enforces that the
@@ -223,10 +223,9 @@ class RealisationsMatcher:
 
         Parameters
         ----------
-        nsim0, nsimx : int
-            The reference and cross simulation IDs.
         cat0, catx: :py:class:`csiborgtools.read.HaloCatalogue`
-            Halo catalogues corresponding to `nsim0` and `nsimx`, respectively.
+            Halo catalogues corresponding to the reference and cross
+            simulations.
         overlap : bool, optional
             whether to calculate overlap between clumps in the initial
             snapshot. by default `false`. this operation is slow.
@@ -235,22 +234,22 @@ class RealisationsMatcher:
 
         Returns
         -------
-        indxs : 1-dimensional array of shape `(nhalos, )`
+        ref_indxs : 1-dimensional array
             Indices of halos in the reference catalogue.
+        cross_indxs : 1-dimensional array
+            Indices of halos in the cross catalogue.
         match_indxs : 1-dimensional array of arrays
             Indices of halo counterparts in the cross catalogue.
         overlaps : 1-dimensional array of arrays
             Overlaps with the cross catalogue.
         """
-        assert (nsim0 == cat0.paths.n_sim) & (nsimx == catx.paths.n_sim)
-
         # Query the KNN
         if verbose:
             print("{}: querying the KNN.".format(datetime.now()), flush=True)
         match_indxs = radius_neighbours(
-            catx.knn0, cat0.positions0, radiusX=cat0["lagpatch"],
-            radiusKNN=catx["lagpatch"], nmult=self.nmult, enforce_in32=True,
-            verbose=verbose)
+            catx.knn(select_initial=True), cat0.positions0,
+            radiusX=cat0["lagpatch"], radiusKNN=catx["lagpatch"],
+            nmult=self.nmult, enforce_in32=True, verbose=verbose)
 
         # Remove neighbours whose mass is too large/small
         if self.dlogmass is not None:
@@ -265,9 +264,9 @@ class RealisationsMatcher:
         if overlap:
             if verbose:
                 print("Loading the clump particles", flush=True)
-            with open(cat0.paths.clump0_path(nsim0), "rb") as f:
+            with open(cat0.paths.clump0_path(cat0.n_sim), "rb") as f:
                 clumps0 = numpy.load(f, allow_pickle=True)
-            with open(catx.paths.clump0_path(nsimx), 'rb') as f:
+            with open(catx.paths.clump0_path(catx.n_sim), 'rb') as f:
                 clumpsx = numpy.load(f, allow_pickle=True)
 
             # Convert 3D positions to particle IDs
@@ -320,7 +319,7 @@ class RealisationsMatcher:
                     match_indxs[k] = match_indxs[k][mask]
                     cross[k] = cross[k][mask]
 
-        return cat0["index"], match_indxs, cross
+        return cat0["index"], catx["index"], match_indxs, cross
 
 
 ###############################################################################
