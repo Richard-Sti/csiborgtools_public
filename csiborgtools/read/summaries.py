@@ -169,7 +169,7 @@ class PKReader:
         return ks, xpks
 
 
-class OverlapReader:
+class PairOverlap:
     r"""
     A shortcut object for reading in the results of matching two simulations.
 
@@ -182,14 +182,15 @@ class OverlapReader:
         Path to the overlap. By default `None`, i.e.
         `/mnt/extraspace/rstiskalek/csiborg/overlap/cross_{}_{}.npz`.
     min_mass : float, optional
-        The minimum :math:`M_{\rm tot} / M_\odot` mass. By default no
-        threshold.
+        Minimum :math:`M_{\rm tot} / M_\odot` mass in the reference catalogue.
+        By default no threshold.
     max_dist : float, optional
-        The maximum comoving distance of a halo. By default no upper limit.
+        Maximum comoving distance in the reference catalogue. By default upper
+        limit.
     """
     _cat0 = None
     _catx = None
-    _refmask = None
+    _data = None
 
     def __init__(self, cat0, catx, fskel=None, min_mass=None, max_dist=None):
         self._cat0 = cat0
@@ -228,28 +229,6 @@ class OverlapReader:
                 "overlap": data["overlap"]}
 
         self._make_refmask(min_mass, max_dist)
-
-    @property
-    def cat0(self):
-        """
-        The reference halo catalogue.
-
-        Returns
-        -------
-        cat0 : :py:class:`csiborgtools.read.HaloCatalogue`
-        """
-        return self._cat0
-
-    @property
-    def catx(self):
-        """
-        The cross halo catalogue.
-
-        Returns
-        -------
-        catx : :py:class:`csiborgtools.read.HaloCatalogue`
-        """
-        return self._catx
 
     @staticmethod
     def _invert_match(match_indxs, overlap, cross_size):
@@ -322,58 +301,37 @@ class OverlapReader:
         # Enforce a cut on the reference catalogue
         min_mass = 0 if min_mass is None else min_mass
         max_dist = numpy.infty if max_dist is None else max_dist
-        m = ((self.cat0["totpartmass"] > min_mass)
-             & (self.cat0["dist"] < max_dist))
+        m = ((self.cat0()["totpartmass"] > min_mass)
+             & (self.cat0()["dist"] < max_dist))
         # Now remove indices that are below this cut
         self._data["index"] = self._data["index"][m]
         self._data["match_indxs"] = self._data["match_indxs"][m]
         self._data["overlap"] = self._data["overlap"][m]
+        self._data["refmask"] = m
 
-        self._refmask = m
-
-    @property
-    def indxs(self):
+    def summed_overlap(self):
         """
-        Indices of halos from the reference catalogue.
+        Summed overlap of each halo in the reference simulation with the cross
+        simulation.
 
         Returns
         -------
-        indxs : 1-dimensional array
+        summed_overlap : 1-dimensional array of shape `(nhalos, )`
         """
-        return self._data["index"]
+        return numpy.array([numpy.sum(cross) for cross in self["overlap"]])
 
-    @property
-    def match_indxs(self):
+    def prob_nomatch(self):
         """
-        Indices of halos from the cross catalogue.
-
-        Returns
-        -------
-        match_indxs : array of 1-dimensional arrays of shape `(nhalos, )`
-        """
-        return self._data["match_indxs"]
-
-    @property
-    def overlap(self):
-        """
-        Pair overlap of halos between the reference and cross simulations.
+        Probability of no match for each halo in the reference simulation with
+        the cross simulation. Defined as a product of 1 - overlap with other
+        halos.
 
         Returns
         -------
-        overlap : array of 1-dimensional arrays of shape `(nhalos, )`
+        prob_nomatch : 1-dimensional array of shape `(nhalos, )`
         """
-        return self._data["overlap"]
-
-    @property
-    def refmask(self):
-        """
-        Mask of the reference catalogue to match the calculated overlaps.
-
-        Returns
-        -------
-        refmask : 1-dimensional boolean array
-        """
-        return self._refmask
+        return numpy.array(
+            [numpy.product(1 - overlap) for overlap in self["overlap"]])
 
     def dist(self, in_initial, norm_kind=None):
         """
@@ -396,27 +354,27 @@ class OverlapReader:
                 or norm_kind in ("r200", "ref_patch", "sum_patch"))
         # Get positions either in the initial or final snapshot
         if in_initial:
-            pos0, posx = self.cat0.positions0, self.catx.positions0
+            pos0, posx = self.cat0().positions0, self.catx().positions0
         else:
-            pos0, posx = self.cat0.positions, self.catx.positions
-        pos0 = pos0[self.refmask, :]  # Apply the reference catalogue mask
+            pos0, posx = self.cat0().positions, self.catx().positions
+        pos0 = pos0[self["refmask"], :]  # Apply the reference catalogue mask
 
         # Get the normalisation array if applicable
         if norm_kind == "r200":
-            norm = self.cat0["r200"][self.refmask]
+            norm = self.cat0("r200")
         if norm_kind == "ref_patch":
-            norm = self.cat0["lagpatch"][self.refmask]
+            norm = self.cat0("lagpatch")
         if norm_kind == "sum_patch":
-            patch0 = self.cat0["lagpatch"][self.refmask]
-            patchx = self.catx["lagpatch"]
-            norm = [None] * self.indxs.size
-            for i, ind in enumerate(self.match_indxs):
+            patch0 = self.cat0("lagpatch")
+            patchx = self.catx("lagpatch")
+            norm = [None] * len(self)
+            for i, ind in enumerate(self["match_indxs"]):
                 norm[i] = patch0[i] + patchx[ind]
             norm = numpy.array(norm, dtype=object)
 
         # Now calculate distances
-        dist = [None] * self.indxs.size
-        for i, ind in enumerate(self.match_indxs):
+        dist = [None] * len(self)
+        for i, ind in enumerate(self["match_indxs"]):
             # n refers to the reference halo catalogue position
             dist[i] = numpy.linalg.norm(pos0[i, :] - posx[ind, :], axis=1)
 
@@ -445,11 +403,10 @@ class OverlapReader:
         -------
         ratio : array of 1-dimensional arrays of shape `(nhalos, )`
         """
-        mass0 = self.cat0[mass_kind][self.refmask]
-        massx = self.catx[mass_kind]
+        mass0, massx = self.cat0(mass_kind), self.catx(mass_kind)
 
-        ratio = [None] * self.indxs.size
-        for i, ind in enumerate(self.match_indxs):
+        ratio = [None] * len(self)
+        for i, ind in enumerate(self["match_indxs"]):
             ratio[i] = mass0[i] / massx[ind]
             if in_log:
                 ratio[i] = numpy.log10(ratio[i])
@@ -457,53 +414,8 @@ class OverlapReader:
                 ratio[i] = numpy.abs(ratio[i])
         return numpy.array(ratio, dtype=object)
 
-    def summed_overlap(self):
-        """
-        Summed overlap of each halo in the reference simulation with the cross
-        simulation.
-
-        Returns
-        -------
-        summed_overlap : 1-dimensional array of shape `(nhalos, )`
-        """
-        return numpy.array([numpy.sum(cross) for cross in self.overlap])
-
-    def copy_per_match(self, par):
-        """
-        Make an array like `self.match_indxs` where each of its element is an
-        equal value array of the pair clump property from the reference
-        catalogue.
-
-        Parameters
-        ----------
-        par : str
-            Property to be copied over.
-
-        Returns
-        -------
-        out : 1-dimensional array of shape `(nhalos, )`
-        """
-        vals = self.cat0[par][self.refmask]
-        out = [None] * self.indxs.size
-        for i, ind in enumerate(self.match_indxs):
-            out[i] = numpy.ones(ind.size) * vals[i]
-        return numpy.array(out, dtype=object)
-
-    def prob_nomatch(self):
-        """
-        Probability of no match for each halo in the reference simulation with
-        the cross simulation. Defined as a product of 1 - overlap with other
-        halos.
-
-        Returns
-        -------
-        out : 1-dimensional array of shape `(nhalos, )`
-        """
-        return numpy.array(
-            [numpy.product(1 - overlap) for overlap in self.overlap])
-
-    def expected_counterpart_mass(self, overlap_threshold=0., in_log=False,
-                                  mass_kind="totpartmass"):
+    def counterpart_mass(self, overlap_threshold=0., in_log=False,
+                         mass_kind="totpartmass"):
         """
         Calculate the expected counterpart mass of each halo in the reference
         simulation from the crossed simulation.
@@ -525,14 +437,13 @@ class OverlapReader:
         -------
         mean, std : 1-dimensional arrays of shape `(nhalos, )`
         """
-        nhalos = self.indxs.size
-        mean = numpy.full(nhalos, numpy.nan)  # Preallocate output arrays
-        std = numpy.full(nhalos, numpy.nan)
+        mean = numpy.full(len(self), numpy.nan, dtype=numpy.float32)
+        std = numpy.full(len(self), numpy.nan, dtype=numpy.float32)
 
-        massx = self.catx[mass_kind]  # Create references to the arrays here
-        overlap = self.overlap        # to speed up the loop below.
+        massx = self.catx(mass_kind)  # Create references to the arrays here
+        overlap = self["overlap"]     # to speed up the loop below.
 
-        for i, match_ind in enumerate(self.match_indxs):
+        for i, match_ind in enumerate(self["match_indxs"]):
             # Skip if no match
             if match_ind.size == 0:
                 continue
@@ -561,6 +472,215 @@ class OverlapReader:
             std[i] = std_
 
         return mean, std
+
+    def copy_per_match(self, par):
+        """
+        Make an array like `self.match_indxs` where each of its element is an
+        equal value array of the pair clump property from the reference
+        catalogue.
+
+        Parameters
+        ----------
+        par : str
+            Property to be copied over.
+
+        Returns
+        -------
+        out : 1-dimensional array of shape `(nhalos, )`
+        """
+        vals = self.cat0(par)
+        out = [None] * len(self)
+        for i, ind in enumerate(self["match_indxs"]):
+            out[i] = numpy.ones(ind.size) * vals[i]
+        return numpy.array(out, dtype=object)
+
+    def cat0(self, key=None, index=None):
+        """
+        Return the reference halo catalogue if `key` is `None`, otherwise
+        return  values from the reference catalogue and apply `refmask`.
+
+        Parameters
+        ----------
+        key : str, optional
+            Key to get. If `None` return the whole catalogue.
+        index : int or array, optional
+            Indices to get, if `None` return all.
+
+        Returns
+        -------
+        out : :py:class:`csiborgtools.read.HaloCatalogue` or array
+        """
+        if key is None:
+            return self._cat0
+        out = self._cat0[key][self["refmask"]]
+        return out if index is None else out[index]
+
+    def catx(self, key=None, index=None):
+        """
+        Return the cross halo catalogue if `key` is `None`, otherwise
+        return  values from the reference catalogue.
+
+        Parameters
+        ----------
+        key : str, optional
+            Key to get. If `None` return the whole catalogue.
+        index : int or array, optional
+            Indices to get, if `None` return all.
+
+        Returns
+        -------
+        out : :py:class:`csiborgtools.read.HaloCatalogue` or array
+        """
+        if key is None:
+            return self._catx
+        out = self._catx[key]
+        return out if index is None else out[index]
+
+    def __getitem__(self, key):
+        """
+        Must be one of `index`, `match_indxs`, `overlap` or `refmask`.
+        """
+        assert key in ("index", "match_indxs", "overlap", "refmask")
+        return self._data[key]
+
+    def __len__(self):
+        return self["index"].size
+
+
+class NPairsOverlap:
+    r"""
+    A shortcut object for reading in the results of matching a reference
+    simulation with many cross simulations.
+
+    Parameters
+    ----------
+    cat0 : :py:class:`csiborgtools.read.HaloCatalogue`
+        Reference simulation halo catalogue.
+    catxs : list of :py:class:`csiborgtools.read.HaloCatalogue`
+        List of cross simulation halo catalogues.
+    fskel : str, optional
+        Path to the overlap. By default `None`, i.e.
+        `/mnt/extraspace/rstiskalek/csiborg/overlap/cross_{}_{}.npz`.
+    min_mass : float, optional
+        Minimum :math:`M_{\rm tot} / M_\odot` mass in the reference catalogue.
+        By default no threshold.
+    max_dist : float, optional
+        Maximum comoving distance in the reference catalogue. By default upper
+        limit.
+    """
+    _pairs = None
+
+    def __init__(self, cat0, catxs, fskel=None, min_mass=None, max_dist=None):
+        self._pairs = [PairOverlap(cat0, catx, fskel=fskel, min_mass=min_mass,
+                                   max_dist=max_dist) for catx in catxs]
+
+    def summed_overlap(self, verbose=False):
+        """
+        Summed overlap of each halo in the reference simulation with the cross
+        simulations.
+
+        Parameters
+        ----------
+        verbose : bool, optional
+
+        Returns
+        -------
+        summed_overlap : 2-dimensional array of shape `(nhalos, ncatxs)`
+        """
+        out = [None] * len(self)
+        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
+            out[i] = pair.summed_overlap()
+        return numpy.vstack(out).T
+
+    def prob_nomatch(self, verbose=False):
+        """
+        Probability of no match for each halo in the reference simulation with
+        the cross simulation.
+
+        Parameters
+        ----------
+        verbose : bool, optional
+
+        Returns
+        -------
+        prob_nomatch : 2-dimensional array of shape `(nhalos, ncatxs)`
+        """
+        out = [None] * len(self)
+        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
+            out[i] = pair.prob_nomatch()
+        return numpy.vstack(out).T
+
+    def counterpart_mass(self, overlap_threshold=0., in_log=False,
+                         mass_kind="totpartmass", return_full=True,
+                         verbose=False):
+        """
+        Calculate the expected counterpart mass of each halo in the reference
+        simulation from the crossed simulation.
+
+        Parameters
+        -----------
+        overlap_threshold : float, optional
+            Minimum overlap required for a halo to be considered a match. By
+            default 0.0, i.e. no threshold.
+        in_log : bool, optional
+            Whether to calculate the expectation value in log space. By default
+            `False`.
+        mass_kind : str, optional
+            The mass kind whose ratio is to be calculated. Must be a valid
+            catalogue key. By default `totpartmass`, i.e. the total particle
+            mass associated with a halo.
+        return_full : bool, optional
+            Whether to return the full results of matching each pair or
+            calculate summary statistics by Gaussian averaging.
+        verbose : bool, optional
+            Verbosity flag. By default `False`.
+
+        Returns
+        -------
+        mu, std : 1-dimensional arrays of shape `(nhalos,)`
+            Summary expected mass and standard deviation from all cross
+            simulations.
+        mus, stds : 2-dimensional arrays of shape `(nhalos, ncatx)`, optional
+            Expected mass and standard deviation from each cross simulation.
+            Returned only if `return_full` is `True`.
+        """
+        mus, stds = [None] * len(self), [None] * len(self)
+        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
+            mus[i], stds[i] = pair.counterpart_mass(
+                overlap_threshold=overlap_threshold, in_log=in_log,
+                mass_kind=mass_kind)
+        mus, stds = numpy.vstack(mus).T, numpy.vstack(stds).T
+
+        probmatch = 1 - self.prob_nomatch()  # Prob of > 0 matches
+        # Normalise it for weighted sums etc.
+        norm_probmatch = numpy.apply_along_axis(
+            lambda x: x / numpy.sum(x), axis=1, arr=probmatch)
+
+        # Mean and standard deviation of weighted stacked Gaussians
+        mu = numpy.sum(norm_probmatch * mus, axis=1)
+        std = numpy.sum(norm_probmatch * (mus**2 + stds**2), axis=1) - mu**2
+
+        if return_full:
+            return mu, std, mus, stds
+        return mu, std
+
+    @property
+    def pairs(self):
+        """
+        List of `PairOverlap` objects in this reader.
+
+        Returns
+        -------
+        pairs : list of :py:class:`csiborgtools.read.PairOverlap`
+        """
+        return self._pairs
+
+    @property
+    def cat0(self):
+        return self.pairs[0].cat0  # All pairs have the same ref catalogue
+
+    def __len__(self):
+        return len(self.pairs)
 
 
 def binned_resample_mean(x, y, prob, bins, nresample=50, seed=42):
