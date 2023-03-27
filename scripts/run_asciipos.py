@@ -14,10 +14,10 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """A script to dump or remove files for POWMES."""
 
+from os.path import join, exists
 from argparse import ArgumentParser
 import numpy
 from datetime import datetime
-from os.path import join, exists
 from os import remove
 from mpi4py import MPI
 try:
