@@ -9,6 +9,7 @@
 ## Project Clustering
 - [ ] Add uncertainty to the kNN-CDF autocorrelation?
 - [ ] Add kNN-CDF differences.
+- [ ] Add reading halo catalogues at higher redshifts.
 - [x] Add the joint kNN-CDF calculation.
 - [x] Make kNN-CDF more memory friendly if generating many randoms.
 
