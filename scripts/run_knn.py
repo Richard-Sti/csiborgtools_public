@@ -42,6 +42,7 @@ parser.add_argument("--rmax", type=float)
 parser.add_argument("--nneighbours", type=int)
 parser.add_argument("--nsamples", type=int)
 parser.add_argument("--neval", type=int)
+parser.add_argument("--batch_size", type=int)
 parser.add_argument("--seed", type=int, default=42)
 args = parser.parse_args()
 
@@ -77,8 +78,8 @@ def do_task(ic):
 
         rs, cdf = knncdf(knn, nneighbours=args.nneighbours, Rmax=Rmax,
                          rmin=args.rmin, rmax=args.rmax, nsamples=args.nsamples,
-                         neval=args.neval, random_state=args.seed,
-                         verbose=False)
+                         neval=args.neval, batch_size=args.batch_size,
+                         random_state=args.seed, verbose=False)
         out.update({"cdf_{}".format(i): cdf})
 
     out.update({"rs": rs, "mass_threshold": mass_threshold})
