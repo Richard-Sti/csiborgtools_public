@@ -18,6 +18,7 @@ kNN-CDF calculation
 from gc import collect
 import numpy
 from scipy.interpolate import interp1d
+from scipy.stats import binned_statistic
 from tqdm import tqdm
 
 
@@ -125,7 +126,8 @@ class kNN_CDF:
         return cdf
 
     def __call__(self, *knns, nneighbours, Rmax, nsamples, rmin, rmax, neval,
-                 verbose=True, random_state=42, dtype=numpy.float32):
+                batch_size=None, verbose=True, random_state=42,
+                left_nan=True, right_nan=True, dtype=numpy.float32):
         """
         Calculate the CDF for a set of kNNs of CSiBORG halo catalogues.
 
@@ -146,10 +148,20 @@ class kNN_CDF:
             Maximum distance to evaluate the CDF.
         neval : int
             Number of points to evaluate the CDF.
+        batch_size : int, optional
+            Number of random points to sample in each batch. By default equal
+            to `nsamples`, however recommeded to be smaller to avoid requesting
+            too much memory,
         verbose : bool, optional
             Verbosity flag.
         random_state : int, optional
             Random state for the random number generator.
+        left_nan : bool, optional
+            Whether to set values where the CDF is 0 to `numpy.nan`. By
+            default `True`.
+        right_nan : bool, optional
+            Whether to set values where the CDF is 1 to `numpy.nan` after its
+            first occurence to 1. By default `True`.
         dtype : numpy dtype, optional
             Calculation data type. By default `numpy.float32`.
 
@@ -160,22 +172,40 @@ class kNN_CDF:
         cdfs : 2 or 3-dimensional array
             CDFs evaluated at `rs`.
         """
-        rand = self.rvs_in_sphere(nsamples, Rmax, random_state=random_state)
+        batch_size = nsamples if batch_size is None else batch_size
+        assert nsamples >= batch_size
+        nbatches = nsamples // batch_size  # Number of batches
 
-        cdfs = [None] * len(knns)
+        # Preallocate the bins and the CDF array
+        bins = numpy.logspace(numpy.log10(rmin), numpy.log10(rmax), neval)
+        cdfs = numpy.zeros((len(knns), nneighbours, neval - 1), dtype=dtype)
         for i, knn in enumerate(tqdm(knns) if verbose else knns):
-            dist, _indxs = knn.kneighbors(rand, nneighbours)
-            dist = dist.astype(dtype)
-            del _indxs
-            collect()
+            # Loop over batches. This is to avoid generating large mocks
+            # requiring a lot of memory. Add counts to the CDF array
+            for j in range(nbatches):
+                rand = self.rvs_in_sphere(batch_size, Rmax,
+                                          random_state=random_state + j)
+                dist, _indxs = knn.kneighbors(rand, nneighbours)
+                for k in range(nneighbours):  # Count for each neighbour
+                    _counts, __, __ = binned_statistic(
+                        dist[:, k], dist[:, k], bins=bins, statistic="count",
+                        range=(rmin, rmax))
+                    cdfs[i, k, :] += _counts
 
+        rs = (bins[1:] + bins[:-1]) / 2     # Bin centers
+        cdfs = numpy.cumsum(cdfs, axis=-1)  # Cumulative sum, i.e. the CDF
+        for i in range(len(knns)):
+            for k in range(nneighbours):
+                cdfs[i, k, :] /= cdfs[i, k, -1]
+                # Set to NaN values after the first point where the CDF is 1
+                if right_nan:
+                    ns = numpy.where(cdfs[i, k, :] == 1.)[0]
+                    if ns.size > 1:
+                        cdfs[i, k, ns[1]:] = numpy.nan
 
-            cdf = [None] * nneighbours
-            for j in range(nneighbours):
-                rs, cdf[j] = self.cdf_from_samples(
-                    dist[:, j], rmin=rmin, rmax=rmax, neval=neval)
-            cdfs[i] = cdf
+        # Set to NaN values where the CDF is 0
+        if left_nan:
+            cdfs[cdfs == 0] = numpy.nan
 
-        cdfs = numpy.asanyarray(cdfs)
         cdfs = cdfs[0, ...] if len(knns) == 1 else cdfs
         return rs, cdfs
