@@ -233,7 +233,7 @@ class kNN_CDF:
             for j in range(nbatches):
                 rand = self.rvs_in_sphere(batch_size, Rmax,
                                           random_state=random_state + j)
-                dist, _indxs = knn.kneighbors(rand, nneighbours)
+                dist, __ = knn.kneighbors(rand, nneighbours)
                 for k in range(nneighbours):  # Count for each neighbour
                     _counts, __, __ = binned_statistic(
                         dist[:, k], dist[:, k], bins=bins, statistic="count",
