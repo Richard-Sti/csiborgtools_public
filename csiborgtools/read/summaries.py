@@ -18,6 +18,7 @@ Tools for summarising various results.
 import numpy
 import joblib
 from os.path import (join, isfile)
+from glob import glob
 from tqdm import tqdm
 
 
@@ -282,6 +283,25 @@ class kNNCDFReader:
 
         cdf = cdf[0, ...] if nknns == 1 else cdf  # Reshape if necessary
         return cdf
+
+    @staticmethod
+    def cross_files(ic, folder):
+        """
+        Return the file paths corresponding to the cross-correlation of a given
+        IC.
+
+        Parameters
+        ----------
+        ic : int
+            The desired IC.
+        folder : str
+            The folder containing the cross-correlation files.
+
+        Returns
+        -------
+        filepath : list of str
+        """
+        return [file for file in glob(join(folder, "*")) if str(ic) in file]
 
 
 class PairOverlap:
