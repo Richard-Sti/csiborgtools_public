@@ -15,11 +15,16 @@
 """
 Tools for summarising various results.
 """
-import numpy
-import joblib
 from os.path import (join, isfile)
 from glob import glob
+import numpy
+import joblib
 from tqdm import tqdm
+
+
+###############################################################################
+#                            PKReader                                         #
+###############################################################################
 
 
 class PKReader:
@@ -170,6 +175,11 @@ class PKReader:
         return ks, xpks
 
 
+###############################################################################
+#                            PKReader                                         #
+###############################################################################
+
+
 class kNNCDFReader:
     """
     Shortcut object to read in the kNN CDF data.
@@ -302,6 +312,11 @@ class kNNCDFReader:
         filepath : list of str
         """
         return [file for file in glob(join(folder, "*")) if str(ic) in file]
+
+
+###############################################################################
+#                            PKReader                                         #
+###############################################################################
 
 
 class PairOverlap:

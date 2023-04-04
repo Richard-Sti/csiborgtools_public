@@ -15,7 +15,6 @@
 """
 Simulation box unit transformations.
 """
-
 import numpy
 from scipy.interpolate import interp1d
 from astropy.cosmology import LambdaCDM
@@ -38,17 +37,21 @@ class BoxUnits:
 
     Paramaters
     ----------
+    nsnap : int
+        Snapshot index.
+    nsim : int
+        IC realisation index.
     paths : py:class`csiborgtools.read.CSiBORGPaths`
-        CSiBORG paths-handling object with set `n_sim` and `n_snap`.
+        CSiBORG paths object.
     """
     _cosmo = None
 
-    def __init__(self, paths):
+    def __init__(self, nsnap, nsim, paths):
         """
         Read in the snapshot info file and set the units from it.
         """
         partreader = ParticleReader(paths)
-        info = partreader.read_info()
+        info = partreader.read_info(nsnap, nsim)
         pars = ["boxlen", "time", "aexp", "H0",
                 "omega_m", "omega_l", "omega_k", "omega_b",
                 "unit_l", "unit_d", "unit_t"]
@@ -68,7 +71,6 @@ class BoxUnits:
         Returns
         -------
         cosmo : `astropy.cosmology.LambdaCDM`
-            The CSiBORG cosmology.
         """
         return self._cosmo
 
@@ -81,7 +83,6 @@ class BoxUnits:
         Returns
         -------
         H0 : float
-            Hubble constant.
         """
         return self._H0
 
@@ -93,7 +94,6 @@ class BoxUnits:
         Returns
         -------
         h : float
-            The little h
         """
         return self._H0 / 100
 
@@ -106,7 +106,6 @@ class BoxUnits:
         Returns
         -------
         G : float
-            The gravitational constant.
         """
         return constants.G.cgs.value * (self._unit_d * self._unit_t ** 2)
 
@@ -118,7 +117,6 @@ class BoxUnits:
         Returns
         -------
         H0 : float
-            The Hubble constant.
         """
         return self.H0 * 1e5 / units.Mpc.to(units.cm) * self._unit_t
 
@@ -130,7 +128,6 @@ class BoxUnits:
         Returns
         -------
         c : float
-            The speed of light.
         """
         return constants.c.cgs.value * self._unit_t / self._unit_l
 
@@ -142,7 +139,6 @@ class BoxUnits:
         Returns
         -------
         rhoc : float
-            The critical density.
         """
 
         return 3 * self.box_H0 ** 2 / (8 * numpy.pi * self.box_G)
@@ -150,8 +146,7 @@ class BoxUnits:
     def box2kpc(self, length):
         r"""
         Convert length from box units to :math:`\mathrm{ckpc}` (with
-        :math:`h=0.705`). It appears that `self.unit_l` must be in
-        :math:`\mathrm{cm}`.
+        :math:`h=0.705`).
 
         Parameters
         ----------
@@ -224,12 +219,12 @@ class BoxUnits:
         Parameters
         ----------
         dist : float
-            Dist in box units.
+            Distance in box units.
 
         Returns
         -------
         cosmo_redshift : foat
-            The cosmological redshift.
+            Cosmological redshift.
         """
         x = numpy.linspace(0., 1., 5001)
         y = self.cosmo.comoving_distance(x)
@@ -244,17 +239,17 @@ class BoxUnits:
         Parameters
         ----------
         vx, vy, vz : 1-dimensional arrays
-            The Cartesian velocity components.
+            Cartesian velocity components.
         px, py, pz : 1-dimensional arrays
-            The Cartesian position vectors components.
+            Cartesian position vectors components.
         p0x, p0y, p0z : floats
-            The centre of the box. By default 0, in which it is assumed that
-            the coordinates are already centred.
+            Centre of the box coordinates. By default 0, in which it is assumed
+            that the coordinates are already centred.
 
         Returns
         -------
         pec_redshift : 1-dimensional array
-            The peculiar redshift.
+            Peculiar redshift.
         """
         # Peculiar velocity along the radial distance
         r = numpy.vstack([px - p0x, py - p0y, pz - p0z]).T
@@ -275,17 +270,17 @@ class BoxUnits:
         Parameters
         ----------
         vx, vy, vz : 1-dimensional arrays
-            The Cartesian velocity components.
+            Cartesian velocity components.
         px, py, pz : 1-dimensional arrays
-            The Cartesian position vectors components.
+            Cartesian position vectors components.
         p0x, p0y, p0z : floats
-            The centre of the box. By default 0, in which it is assumed that
-            the coordinates are already centred.
+            Centre of the box coordinates. By default 0, in which it is assumed
+            that the coordinates are already centred.
 
         Returns
         -------
         obs_redshift : 1-dimensional array
-            The observed redshift.
+            Observed redshift.
         """
         r = numpy.vstack([px - p0x, py - p0y, pz - p0z]).T
         zcosmo = self.box2cosmoredshift(numpy.sum(r**2, axis=1)**0.5)

@@ -62,6 +62,7 @@ ics = [7444, 7468, 7492, 7516, 7540, 7564, 7588, 7612, 7636, 7660, 7684,
 dumpdir = "/mnt/extraspace/rstiskalek/csiborg/knn"
 fout_auto = join(dumpdir, "auto", "knncdf_{}.p")
 fout_cross = join(dumpdir, "cross", "knncdf_{}_{}.p")
+paths = csiborgtools.read.CSiBORGPaths()
 
 
 ###############################################################################
@@ -72,11 +73,11 @@ knncdf = csiborgtools.match.kNN_CDF()
 
 def do_auto(ic):
     out = {}
-    cat = csiborgtools.read.HaloCatalogue(ic, max_dist=Rmax)
+    cat = csiborgtools.read.HaloCatalogue(ic, paths, max_dist=Rmax)
 
     for i, mmin in enumerate(mass_threshold):
         knn = NearestNeighbors()
-        knn.fit(cat.positions[cat["totpartmass"] > mmin, ...])
+        knn.fit(cat.positions(False)[cat["totpartmass"] > mmin, ...])
 
         rs, cdf = knncdf(knn, nneighbours=args.nneighbours, Rmax=Rmax,
                          rmin=args.rmin, rmax=args.rmax, nsamples=args.nsamples,
@@ -90,15 +91,15 @@ def do_auto(ic):
 
 def do_cross(ics):
     out = {}
-    cat1 = csiborgtools.read.HaloCatalogue(ics[0], max_dist=Rmax)
-    cat2 = csiborgtools.read.HaloCatalogue(ics[1], max_dist=Rmax)
+    cat1 = csiborgtools.read.HaloCatalogue(ics[0], paths, max_dist=Rmax)
+    cat2 = csiborgtools.read.HaloCatalogue(ics[1], paths, max_dist=Rmax)
 
     for i, mmin in enumerate(mass_threshold):
         knn1 = NearestNeighbors()
-        knn1.fit(cat1.positions[cat1["totpartmass"] > mmin, ...])
+        knn1.fit(cat1.positions()[cat1["totpartmass"] > mmin, ...])
 
         knn2 = NearestNeighbors()
-        knn2.fit(cat2.positions[cat2["totpartmass"] > mmin, ...])
+        knn2.fit(cat2.positions()[cat2["totpartmass"] > mmin, ...])
 
         rs, cdf0, cdf1, joint_cdf = knncdf.joint(
             knn1, knn2, nneighbours=args.nneighbours, Rmax=Rmax,
