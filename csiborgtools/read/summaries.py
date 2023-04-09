@@ -18,6 +18,7 @@ Tools for summarising various results.
 from os.path import (join, isfile)
 from glob import glob
 import numpy
+from scipy.special import factorial
 import joblib
 from tqdm import tqdm
 
@@ -184,55 +185,53 @@ class kNNCDFReader:
     """
     Shortcut object to read in the kNN CDF data.
     """
-    def read(self, files, ks, rmin=None, rmax=None, to_clip=True):
+    def read(self, run, folder, rmin=None, rmax=None, to_clip=True):
         """
-        Read the kNN CDF data can be either the auto- or cross-correlation.
+        Read the auto- or cross-correlation kNN-CDF data. Infers the type from
+        the data files.
 
         Parameters
         ----------
-        files : list of str
-            List of file paths to read in.
-        ks : list of int
-            kNN values to read in.
+        run : str
+            Run ID to read in.
+        folder : str
+            Path to the folder where the auto-correlation kNN-CDF is stored.
         rmin : float, optional
             Minimum separation. By default ignored.
         rmax : float, optional
             Maximum separation. By default ignored.
         to_clip : bool, optional
-            Whether to clip the auto-correlation CDF. Ignored if reading in the
+            Whether to clip the auto-correlation CDF. Ignored for
             cross-correlation.
 
         Returns
         -------
-        rs : 1-dimensional array
-            Array of separations.
-        out : 4-dimensional array
-            Auto-correlation or cross-correlation kNN CDFs. The shape is
-            `(len(files), len(mass_thresholds), len(ks), neval)`.
-        mass_thresholds : 1-dimensional array
-            Array of mass thresholds.
+        rs : 1-dimensional array of shape `(neval, )`
+            Separations where the CDF is evaluated.
+        out : 3-dimensional array of shape `(len(files), len(ks), neval)`
+            Array of CDFs or cross-correlations.
         """
-        data = joblib.load(files[0])
-        if "cdf_0" in data.keys():
-            isauto = True
-            kind = "cdf"
-        elif "corr_0" in data.keys():
-            isauto = False
-            kind = "corr"
-        else:
-            raise ValueError("Unknown data format.")
-        rs = data["rs"]
-        mass_thresholds = data["mass_threshold"]
-        neval = data["{}_0".format(kind)].shape[1]
-        out = numpy.full((len(files), len(mass_thresholds), len(ks), neval),
-                         numpy.nan, dtype=numpy.float32)
+        run += ".p"
+        files = [f for f in glob(join(folder, "*")) if run in f]
+        if len(files) == 0:
+            raise RuntimeError("No files found for run `{}`.".format(run[:-2]))
 
-        for i, file in enumerate(tqdm(files)):
+        for i, file in enumerate(files):
             data = joblib.load(file)
-            for j in range(len(mass_thresholds)):
-                out[i, j, ...] = data["{}_{}".format(kind, j)][ks, :]
-                if isauto and to_clip:
-                    out[i, j, ...] = self.clipped_cdf(out[i, j, ...])
+            if i == 0:  # Initialise the array
+                if "corr" in data.keys():
+                    kind = "corr"
+                    isauto = False
+                else:
+                    kind = "cdf"
+                    isauto = True
+                out = numpy.full((len(files), *data[kind].shape), numpy.nan,
+                                 dtype=numpy.float32)
+                rs = data["rs"]
+            out[i, ...] = data[kind]
+
+            if isauto and to_clip:
+                out[i, ...] = self.clipped_cdf(out[i, ...])
 
         # Apply separation cuts
         mask = (rs >= rmin if rmin is not None else rs > 0)
@@ -240,7 +239,7 @@ class kNNCDFReader:
         rs = rs[mask]
         out = out[..., mask]
 
-        return rs, out, mass_thresholds
+        return rs, out
 
     @staticmethod
     def peaked_cdf(cdf, make_copy=True):
@@ -295,36 +294,73 @@ class kNNCDFReader:
         return cdf
 
     @staticmethod
-    def prob_kvolume(cdfs, rs=None, normalise=False):
-        """
-        Calculate the probability that a spherical volume contains :math:`k`=
-        objects from the kNN CDFs.
+    def prob_k(cdf):
+        r"""
+        Calculate the PDF that a spherical volume of radius :math:`r` contains
+        :math:`k` objects, i.e. :math:`P(k | V = 4 \pi r^3 / 3)`.
 
         Parameters
         ----------
-        cdf : 4-dimensional array of shape `(nfiles, nmasses, nknn, nrs)`
+        cdf : 3-dimensional array of shape `(len(files), len(ks), len(rs))`
             Array of CDFs
-        normalise : bool, optional
-            Whether to normalise the probability to 1.
 
         Returns
         -------
-        pk : 4-dimensional array of shape `(nfiles, nmasses, nknn - 1, nrs)`
+        pk : 3-dimensional array of shape `(len(files), len(ks)- 1, len(rs))`
         """
-        out = numpy.full_like(cdfs[..., 1:, :], numpy.nan, dtype=numpy.float32)
+        out = numpy.full_like(cdf[..., 1:, :], numpy.nan, dtype=numpy.float32)
+        nks = cdf.shape[-2]
+        out[..., 0, :] = 1 - cdf[..., 0, :]
 
-        for k in range(cdfs.shape[-2] - 1):
-            out[..., k, :] = cdfs[..., k, :] - cdfs[..., k + 1, :]
+        for k in range(1, nks - 1):
+            out[..., k, :] = cdf[..., k - 1, :] - cdf[..., k, :]
 
-        if normalise:
-            assert rs is not None, "rs must be provided to normalise."
-            assert rs.ndim == 1
-
-            norm = numpy.nansum(
-                0.5 * (out[..., 1:] + out[..., :-1]) * (rs[1:] - rs[:-1]),
-                axis=-1)
-            out /= norm.reshape(*norm.shape, 1)
         return out
+
+    def mean_prob_k(self, cdf):
+        """
+        Calculate the mean PDF that a spherical volume of radius :math:`r`
+        contains :math:`k` objects, i.e. :math:`P(k | V = 4 \pi r^3 / 3)`,
+        averaged over the IC realisations.
+
+        Parameters
+        ----------
+        cdf : 3-dimensional array of shape `(len(files), len(ks), len(rs))`
+            Array of CDFs
+        Returns
+        -------
+        out : 3-dimensional array of shape `(len(ks) - 1, len(rs), 2)`
+            Mean :math:`P(k | V = 4 \pi r^3 / 3) and its standard deviation,
+            stored along the last dimension, respectively.
+        """
+        pk = self.prob_k(cdf)
+        return numpy.stack([numpy.mean(pk, axis=0), numpy.std(pk, axis=0)],
+                           axis=-1)
+
+    def poisson_prob_k(self, rs, k, ndensity):
+        """
+        Calculate the analytical PDF that a spherical volume of
+        radius :math:`r` contains :math:`k` objects, i.e.
+        :math:`P(k | V = 4 \pi r^3 / 3)`, assuming a Poisson field (uniform
+        distribution of points).
+
+        Parameters
+        ----------
+        rs : 1-dimensional array
+            Array of separations.
+        k : int
+            Number of objects.
+        ndensity : float
+            Number density of objects.
+
+        Returns
+        -------
+        pk : 1-dimensional array
+            The PDF that a spherical volume of radius :math:`r` contains
+            :math:`k` objects.
+        """
+        V = 4 * numpy.pi / 3 * rs**3
+        return (ndensity * V)**k / factorial(k) * numpy.exp(-ndensity * V)
 
     @staticmethod
     def cross_files(ic, folder):
