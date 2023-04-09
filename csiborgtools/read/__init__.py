@@ -14,9 +14,10 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 from .readsim import (CSiBORGPaths, ParticleReader, read_mmain, read_initcm, halfwidth_select)  # noqa
-from .make_cat import (HaloCatalogue, concatenate_clumps)  # noqa
-from .readobs import (PlanckClusters, MCXCClusters, TwoMPPGalaxies,  # noqa
+from .halo_cat import (HaloCatalogue, concatenate_clumps)  # noqa
+from .obs import (PlanckClusters, MCXCClusters, TwoMPPGalaxies,  # noqa
                       TwoMPPGroups, SDSS)  # noqa
 from .outsim import (dump_split, combine_splits)  # noqa
-from .summaries import (PKReader, kNNCDFReader, PairOverlap, NPairsOverlap,  # noqa
-                        binned_resample_mean) # noqa
+from .overlap_summary import (PairOverlap, NPairsOverlap, binned_resample_mean) # noqa
+from .knn_summary import kNNCDFReader  # noqa
+from .pk_summary import PKReader  # noqa
