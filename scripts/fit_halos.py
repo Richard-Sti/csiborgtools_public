@@ -34,7 +34,7 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 nproc = comm.Get_size()
 
-paths = csiborgtools.read.CSiBORGPaths()
+paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
 dumpdir = "/mnt/extraspace/rstiskalek/csiborg/"
 loaddir = join(dumpdir, "temp")
 cols_collect = [("npart", numpy.int64), ("totpartmass", numpy.float64),
@@ -118,8 +118,7 @@ for i, nsim in enumerate(paths.ic_ids(tonew=False)):
         out_collected = csiborgtools.read.combine_splits(
             utils.Nsplits, nsnap, nsim, partreader, cols_collect,
             remove_splits=True, verbose=False)
-        fname = join(paths.dumpdir, "ramses_out_{}_{}.npy"
-                     .format(str(nsim).zfill(5), str(nsnap).zfill(5)))
+        fname = paths.hcat_path(nsim)
         print("Saving results to `{}`.".format(fname))
         numpy.save(fname, out_collected)
 
