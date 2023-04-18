@@ -21,9 +21,9 @@ from .obs import (  # noqa
     TwoMPPGalaxies,
     TwoMPPGroups,
 )
-from .outsim import combine_splits, dump_split  # noqa
 from .overlap_summary import NPairsOverlap, PairOverlap, binned_resample_mean  # noqa
 from .paths import CSiBORGPaths  # noqa
 from .pk_summary import PKReader  # noqa
 from .readsim import MmainReader, ParticleReader, halfwidth_select, read_initcm  # noqa
 from .tpcf_summary import TPCFReader  # noqa
+from .utils import cartesian_to_radec, radec_to_cartesian
