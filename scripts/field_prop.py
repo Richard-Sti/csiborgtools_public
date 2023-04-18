@@ -16,17 +16,20 @@
 MPI script to evaluate field properties at the galaxy positions.
 """
 from argparse import ArgumentParser
-from os.path import join
-from os import remove
 from datetime import datetime
+from os import remove
+from os.path import join
+
 import numpy
 from mpi4py import MPI
+
 try:
     import csiborgtools
 except ModuleNotFoundError:
     import sys
     sys.path.append("../")
     import csiborgtools
+
 import utils
 
 dumpdir = "/mnt/extraspace/rstiskalek/csiborg/"
@@ -61,16 +64,16 @@ dtype = {"names": ["delta", "phi"], "formats": [numpy.float32] * 2}
 
 # CSiBORG simulation paths
 paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
-ics = paths.ic_ids(tonew=False)
+ics = paths.get_ics(tonew=False)
 nsims = len(ics)
 
-for n in csiborgtools.fits.split_jobs(nsims, nproc)[rank]:
+for n in csiborgtools.utils.split_jobs(nsims, nproc)[rank]:
     print("Rank {}@{}: working on {}th IC.".format(rank, datetime.now(), n),
           flush=True)
     nsim = ics[n]
     nsnap = max(paths.get_snapshots(nsim))
     reader = csiborgtools.read.ParticleReader(paths)
-    box = csiborgtools.units.BoxUnits(nsnap, nsim, paths)
+    box = csiborgtools.read.BoxUnits(nsnap, nsim, paths)
 
     # Read particles and select a subset of them
     particles = reader.read_particle(nsnap, nsim, ["x", "y", "z", "M"],

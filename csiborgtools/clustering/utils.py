@@ -13,10 +13,10 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """Clustering support functions."""
-from abc import (ABC, abstractmethod)
+from abc import ABC, abstractmethod
 from warnings import warn
-import numpy
 
+import numpy
 
 ###############################################################################
 #                            Random points                                    #
@@ -77,7 +77,7 @@ class RVSinsphere(BaseRVS):
 
 
 class RVSinbox(BaseRVS):
-    """
+    r"""
     Generator of uniform RVS in a box of width `L` in Cartesian coordinates in
     :math:`[0, L]^3`.
 
@@ -100,7 +100,7 @@ class RVSinbox(BaseRVS):
 
 
 class RVSonsphere(BaseRVS):
-    """
+    r"""
     Generator of uniform RVS on the surface of a unit sphere. RA is in
     :math:`[0, 2\pi)` and dec in :math:`[-\pi / 2, \pi / 2]`, respectively.
     If `indeg` is `True` then converted to degrees.
@@ -148,7 +148,7 @@ def wrapRA(ra, indeg):
     """
     mask = ra < 0
     if numpy.sum(mask) == 0:
-        warn("No negative right ascension found.", UserWarning())
+        warn("No negative right ascension found.", UserWarning, stacklevel=1)
     ra[mask] += 360 if indeg else 2 * numpy.pi
     return ra
 
@@ -177,7 +177,7 @@ def normalised_marks(x, y, nbins):
     """
     assert x.ndim == y.ndim == 1
     if y.dtype not in [numpy.float32, numpy.float64]:
-        raise NotImplemented("Marks from integers are not supported.")
+        raise NotImplementedError("Marks from integers are not supported.")
 
     bins = numpy.percentile(x, q=numpy.linspace(0, 100, nbins + 1))
     marks = numpy.full_like(y, numpy.nan)

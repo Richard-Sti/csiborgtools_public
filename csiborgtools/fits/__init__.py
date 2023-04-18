@@ -12,7 +12,5 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-from .haloprofile import (NFWProfile, NFWPosterior)  # noqa
-from .halo  import (distribute_halos, clump_with_particles,  # noqa
-                    dump_split_particles, load_split_particles,  # noqa
-                    split_jobs, pick_single_clump, Clump)  # noqa
+from .halo import Clump, Halo  # noqa
+from .haloprofile import NFWPosterior, NFWProfile  # noqa

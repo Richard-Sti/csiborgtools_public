@@ -13,17 +13,42 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """2PCF reader."""
-from os.path import join
-from glob import glob
-import numpy
 import joblib
+import numpy
+
+from .paths import CSiBORGPaths
 
 
 class TPCFReader:
     """
     Shortcut object to read in the 2PCF data.
+
+    Parameters
+    ----------
+    paths : py:class`csiborgtools.read.CSiBORGPaths`
     """
-    def read(self, run, folder):
+    _paths = None
+
+    def __init__(self, paths):
+        self.paths = paths
+
+    @property
+    def paths(self):
+        """
+        Paths manager.
+
+        Parameters
+        ----------
+        paths : py:class`csiborgtools.read.CSiBORGPaths`
+        """
+        return self._paths
+
+    @paths.setter
+    def paths(self, paths):
+        assert isinstance(paths, CSiBORGPaths)
+        self._paths = paths
+
+    def read(self, run):
         """
         Read the auto- or cross-correlation kNN-CDF data. Infers the type from
         the data files.
@@ -32,8 +57,6 @@ class TPCFReader:
         ----------
         run : str
             Run ID to read in.
-        folder : str
-            Path to the folder where the auto-2PCF is stored.
 
         Returns
         -------
@@ -42,8 +65,7 @@ class TPCFReader:
         out : 2-dimensional array of shape `(len(files), len(rp))`
             Array of 2PCFs.
         """
-        run += ".p"
-        files = [f for f in glob(join(folder, "*")) if run in f]
+        files = self.paths.tpcfauto_path(run)
         if len(files) == 0:
             raise RuntimeError("No files found for run `{}`.".format(run[:-2]))
 

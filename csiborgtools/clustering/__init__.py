@@ -13,10 +13,19 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 from warnings import warn
-from .knn import kNN_CDF  # noqa
-from .utils import (RVSinsphere, RVSinbox, RVSonsphere, BaseRVS, normalised_marks)  # noqa
+
+from csiborgtools.clustering.knn import kNN_CDF  # noqa
+from csiborgtools.clustering.utils import (  # noqa
+    BaseRVS,
+    RVSinbox,
+    RVSinsphere,
+    RVSonsphere,
+    normalised_marks,
+)
+
 try:
-    import Corrfunc
+    import Corrfunc  # noqa
+
     from .tpcf import Mock2PCF  # noqa
 except ImportError:
     warn("`Corrfunc` not installed. 2PCF modules will not be available (`Mock2PCF`).")  # noqa

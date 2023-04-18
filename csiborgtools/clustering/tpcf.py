@@ -16,6 +16,7 @@
 import numpy
 from Corrfunc.theory.DD import DD
 from Corrfunc.utils import convert_3d_counts_to_cf
+
 from .utils import BaseRVS
 
 
@@ -63,6 +64,7 @@ class Mock2PCF:
                 periodic=False)
 
         ndata = pos.shape[0]
-        xi = convert_3d_counts_to_cf(ndata, ndata, nrandom, nrandom, dd, dr, dr, rr)
+        xi = convert_3d_counts_to_cf(ndata, ndata, nrandom, nrandom,
+                                     dd, dr, dr, rr)
         rp = 0.5 * (bins[1:] + bins[:-1])
         return rp, xi

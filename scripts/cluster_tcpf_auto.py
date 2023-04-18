@@ -12,19 +12,19 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-"""A script to calculate the KNN-CDF for a set of CSiBORG halo catalogues."""
-from warnings import warn
-from os.path import join
+"""A script to calculate the auto-2PCF of CSiBORG catalogues."""
 from argparse import ArgumentParser
 from copy import deepcopy
 from datetime import datetime
-from itertools import combinations
+from os.path import join
+from warnings import warn
+
+import joblib
+import numpy
+import yaml
 from mpi4py import MPI
 from TaskmasterMPI import master_process, worker_process
-import numpy
-from sklearn.neighbors import NearestNeighbors
-import joblib
-import yaml
+
 try:
     import csiborgtools
 except ModuleNotFoundError:
@@ -43,7 +43,7 @@ nproc = comm.Get_size()
 parser = ArgumentParser()
 parser.add_argument("--runs", type=str, nargs="+")
 args = parser.parse_args()
-with open('../scripts/knn_cross.yml', 'r') as file:
+with open('../scripts/tpcf_auto.yml', 'r') as file:
     config = yaml.safe_load(file)
 
 Rmax = 155 / 0.705  # Mpc (h = 0.705) high resolution region radius
@@ -58,16 +58,18 @@ ics = [7444, 7468, 7492, 7516, 7540, 7564, 7588, 7612, 7636, 7660, 7684,
        9292, 9316, 9340, 9364, 9388, 9412, 9436, 9460, 9484, 9508, 9532,
        9556, 9580, 9604, 9628, 9652, 9676, 9700, 9724, 9748, 9772, 9796,
        9820, 9844]
-paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
-dumpdir = "/mnt/extraspace/rstiskalek/csiborg/knn"
-fout = join(dumpdir, "cross", "knncdf_{}_{}_{}.p")
-knncdf = csiborgtools.clustering.kNN_CDF()
+dumpdir = "/mnt/extraspace/rstiskalek/csiborg/tpcf"
+fout = join(dumpdir, "auto", "tpcf_{}_{}.p")
+paths = csiborgtools.read.CSiBORGPaths()
+tpcf = csiborgtools.clustering.Mock2PCF()
 
 ###############################################################################
-#                               Analysis                                      #
+#                                 Analysis                                    #
 ###############################################################################
+
 
 def read_single(selection, cat):
+    """Positions for single catalogue auto-correlation."""
     mmask = numpy.ones(len(cat), dtype=bool)
     pos = cat.positions(False)
     # Primary selection
@@ -77,54 +79,65 @@ def read_single(selection, cat):
         mmask &= (cat[psel["name"]] >= pmin)
     if pmax is not None:
         mmask &= (cat[psel["name"]] < pmax)
-    return pos[mmask, ...]
+    pos = pos[mmask, ...]
 
-def do_cross(run, ics):
+    # Secondary selection
+    if "secondary" not in selection:
+        return pos
+    smask = numpy.ones(pos.shape[0], dtype=bool)
+    ssel = selection["secondary"]
+    smin, smax = ssel.get("min", None), ssel.get("max", None)
+    prop = cat[ssel["name"]][mmask]
+    if ssel.get("toperm", False):
+        prop = numpy.random.permutation(prop)
+    if ssel.get("marked", True):
+        x = cat[psel["name"]][mmask]
+        prop = csiborgtools.clustering.normalised_marks(
+            x, prop, nbins=config["nbins_marks"])
+
+    if smin is not None:
+        smask &= (prop >= smin)
+    if smax is not None:
+        smask &= (prop < smax)
+
+    return pos[smask, ...]
+
+
+def do_auto(run, cat, ic):
     _config = config.get(run, None)
     if _config is None:
-        warn("No configuration for run {}.".format(run))
+        warn("No configuration for run {}.".format(run), stacklevel=1)
         return
+
     rvs_gen = csiborgtools.clustering.RVSinsphere(Rmax)
-    knn1, knn2 = NearestNeighbors(), NearestNeighbors()
+    bins = numpy.logspace(numpy.log10(config["rpmin"]),
+                          numpy.log10(config["rpmax"]), config["nrpbins"] + 1)
+    pos = read_single(_config, cat)
+    nrandom = int(config["randmult"] * pos.shape[0])
+    rp, wp = tpcf(pos, rvs_gen, nrandom, bins)
 
-    cat1 = csiborgtools.read.HaloCatalogue(ics[0], paths, max_dist=Rmax)
-    pos1 = read_single(_config, cat1)
-    knn1.fit(pos1)
+    joblib.dump({"rp": rp, "wp": wp}, paths.tpcfauto_path(run, ic))
 
-    cat2 = csiborgtools.read.HaloCatalogue(ics[1], paths, max_dist=Rmax)
-    pos2 = read_single(_config, cat2)
-    knn2.fit(pos2)
 
-    rs, cdf0, cdf1, joint_cdf = knncdf.joint(
-        knn1, knn2, rvs_gen=rvs_gen, nneighbours=int(config["nneighbours"]),
-        rmin=config["rmin"], rmax=config["rmax"],
-        nsamples=int(config["nsamples"]), neval=int(config["neval"]),
-        batch_size=int(config["batch_size"]), random_state=config["seed"])
-
-    corr = knncdf.joint_to_corr(cdf0, cdf1, joint_cdf)
-
-    joblib.dump({"rs": rs, "corr": corr},
-                fout.format(str(ics[0]).zfill(5), str(ics[1]).zfill(5), run))
-
-def do_runs(ics):
-    print(ics)
+def do_runs(ic):
+    cat = csiborgtools.read.ClumpsCatalogue(ic, paths, maxdist=Rmax)
     for run in args.runs:
-        do_cross(run, ics)
+        do_auto(run, cat, ic)
 
 
 ###############################################################################
-#                         Crosscorrelation calculation                        #
+#                             MPI task delegation                             #
 ###############################################################################
 
 
 if nproc > 1:
     if rank == 0:
-        tasks = list(combinations(ics, 2))
+        tasks = deepcopy(ics)
         master_process(tasks, comm, verbose=True)
     else:
         worker_process(do_runs, comm, verbose=False)
 else:
-    tasks = list(combinations(ics, 2))
+    tasks = deepcopy(ics)
     for task in tasks:
         print("{}: completing task `{}`.".format(datetime.now(), task))
         do_runs(task)

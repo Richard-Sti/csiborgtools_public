@@ -19,14 +19,16 @@ are grouped in a clump at present redshift.
 Optionally also dumps the clumps information, however watch out as this will
 eat up a lot of memory.
 """
-from gc import collect
-from os.path import join
-from os import remove
 from argparse import ArgumentParser
 from datetime import datetime
 from distutils.util import strtobool
+from gc import collect
+from os import remove
+from os.path import join
+
 import numpy
 from mpi4py import MPI
+
 try:
     import csiborgtools
 except ModuleNotFoundError:
@@ -45,12 +47,10 @@ parser.add_argument("--dump_clumps", type=lambda x: bool(strtobool(x)))
 args = parser.parse_args()
 
 paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
-nsims = paths.ic_ids(tonew=True)
+nsims = paths.get_ics(tonew=True)
 
-# Output files
-ftemp = join(paths.dumpdir, "temp_initmatch", "temp_{}_{}_{}.npy")
-fpermcm = join(paths.dumpdir, "initmatch", "clump_{}_cm.npy")
-fpermpart = join(paths.dumpdir, "initmatch", "clump_{}_particles.npy")
+# Temporary output file
+ftemp = join(paths.dumpdir, "temp", "initmatch_{}_{}_{}.npy")
 
 for nsim in nsims:
     if rank == 0:
@@ -87,7 +87,7 @@ for nsim in nsims:
     unique_clumpids = numpy.unique(clump_ids)
 
     njobs = unique_clumpids.size
-    jobs = csiborgtools.fits.split_jobs(njobs, nproc)[rank]
+    jobs = csiborgtools.utils.split_jobs(njobs, nproc)[rank]
     for i in jobs:
         n = unique_clumpids[i]
         x0 = part0[clump_ids == n]
@@ -139,8 +139,8 @@ for nsim in nsims:
             out["ID"][i] = n
 
         print("{}: dumping to .. `{}`.".format(
-            datetime.now(), fpermcm.format(nsim)), flush=True)
-        with open(fpermcm.format(nsim), 'wb') as f:
+            datetime.now(), paths.initmatch_path(nsim, "cm")), flush=True)
+        with open(paths.initmatch_path(nsim, "cm"), 'wb') as f:
             numpy.save(f, out)
 
         if args.dump_clumps:
@@ -157,9 +157,11 @@ for nsim in nsims:
                 out["clump"][i] = fin
                 out["ID"][i] = n
                 remove(fpath)
-            print("{}: dumping to .. `{}`.".format(
-                datetime.now(), fpermpart.format(nsim)), flush=True)
-            with open(fpermpart.format(nsim), "wb") as f:
+
+            fout = paths.initmatch_path(nsim, "particles")
+            print("{}: dumping to .. `{}`.".format(datetime.now(), fout),
+                  flush=True)
+            with open(fout, "wb") as f:
                 numpy.save(f, out)
 
             del out

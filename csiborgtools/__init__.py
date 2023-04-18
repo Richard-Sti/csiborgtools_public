@@ -12,11 +12,10 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-from csiborgtools import (read, match, utils, units, fits, field, clustering)  # noqa
+from csiborgtools import clustering, field, fits, match, read  # noqa
 
 # Arguments to csiborgtools.read.CSiBORGPaths.
 paths_glamdring = {
     "srcdir": "/mnt/extraspace/hdesmond/",
-    "dumpdir": "/mnt/extraspace/rstiskalek/csiborg/",
-    "mmain_path": "/mnt/zfsusers/hdesmond/Mmain",
-    "initmatch_path": "/mnt/extraspace/rstiskalek/csiborg/initmatch/"}
+    "postdir": "/mnt/extraspace/rstiskalek/csiborg/"
+    }

@@ -13,17 +13,20 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """A script to calculate overlap between two CSiBORG realisations."""
-from os.path import join
 from argparse import ArgumentParser
 from datetime import datetime
+from os.path import join
+
 import numpy
 from scipy.ndimage import gaussian_filter
+
 try:
     import csiborgtools
 except ModuleNotFoundError:
     import sys
     sys.path.append("../")
     import csiborgtools
+
 import utils
 
 # Argument parser
@@ -44,18 +47,19 @@ overlapper = csiborgtools.match.ParticleOverlap()
 # Load catalogues
 print("{}: loading catalogues {} and {}."
       .format(datetime.now(), args.nsim0, args.nsimx), flush=True)
-cat0 = csiborgtools.read.HaloCatalogue(args.nsim0, paths)
-catx = csiborgtools.read.HaloCatalogue(args.nsimx, paths)
+cat0 = csiborgtools.read.ClumpsCatalogue(args.nsim0, paths)
+catx = csiborgtools.read.ClumpsCatalogue(args.nsimx, paths)
 
 
 print("{}: loading simulation {} and converting positions to cell numbers."
       .format(datetime.now(), args.nsim0), flush=True)
-with open(paths.clump0_path(args.nsim0), "rb") as f:
+
+with open(paths.initmatch_path(args.nsim0, "particles"), "rb") as f:
     clumps0 = numpy.load(f, allow_pickle=True)
     overlapper.clumps_pos2cell(clumps0)
 print("{}: loading simulation {} and converting positions to cell numbers."
       .format(datetime.now(), args.nsimx), flush=True)
-with open(paths.clump0_path(args.nsimx), 'rb') as f:
+with open(paths.initmatch_path(args.nsimx, "particles"), 'rb') as f:
     clumpsx = numpy.load(f, allow_pickle=True)
     overlapper.clumps_pos2cell(clumpsx)
 

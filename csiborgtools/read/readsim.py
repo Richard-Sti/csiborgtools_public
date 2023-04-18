@@ -15,274 +15,18 @@
 """
 Functions to read in the particle and clump files.
 """
-from os.path import (join, isfile, isdir)
-from glob import glob
+from os.path import isfile, join
 from warnings import warn
+
 import numpy
 from scipy.io import FortranFile
-from tqdm import tqdm
-from ..utils import (cols_to_structured)
+from tqdm import tqdm, trange
 
-
-###############################################################################
-#                            Paths manager                                    #
-###############################################################################
-
-
-class CSiBORGPaths:
-    """
-    Paths manager for CSiBORG IC realisations.
-
-    Parameters
-    ----------
-    srcdir : str
-        Path to the folder where CSiBORG simulations are stored.
-    dumpdir : str
-        Path to the folder where files from `run_fit_halos` are stored.
-    mmain_path : str
-        Path to folder where mmain files are stored.
-    initmatch_path : str
-        Path to the folder where particle ID match between the first and final
-        snapshot is stored.
-    """
-    _srcdir = None
-    _dumpdir = None
-    _mmain_path = None
-    _initmatch_path = None
-
-    def __init__(self, srcdir=None, dumpdir=None, mmain_path=None,
-                 initmatch_path=None):
-        self.srcdir = srcdir
-        self.dumpdir = dumpdir
-        self.mmain_path = mmain_path
-        self.initmatch_path = initmatch_path
-
-    @staticmethod
-    def _check_directory(path):
-        if not isdir(path):
-            raise IOError("Invalid directory `{}`!".format(path))
-
-    @property
-    def srcdir(self):
-        """
-        Path to the folder where CSiBORG simulations are stored.
-
-        Returns
-        -------
-        path : str
-        """
-        if self._srcdir is None:
-            raise ValueError("`srcdir` is not set!")
-        return self._srcdir
-
-    @srcdir.setter
-    def srcdir(self, path):
-        if path is None:
-            return
-        self._check_directory(path)
-        self._srcdir = path
-
-    @property
-    def dumpdir(self):
-        """
-        Path to the folder where files from `run_fit_halos` are stored.
-
-        Returns
-        -------
-        path : str
-        """
-        if self._dumpdir is None:
-            raise ValueError("`dumpdir` is not set!")
-        return self._dumpdir
-
-    @dumpdir.setter
-    def dumpdir(self, path):
-        if path is None:
-            return
-        self._check_directory(path)
-        self._dumpdir = path
-
-    @property
-    def temp_dumpdir(self):
-        """
-        Path to a temporary dumping folder.
-
-        Returns
-        -------
-        path : str
-        """
-        fpath = join(self.dumpdir, "temp")
-        if not isdir(fpath):
-            raise IOError("Invalid directory `{}`.".format(fpath))
-        return fpath
-
-    @property
-    def mmain_path(self):
-        """
-        Path to the folder where mmain files are stored.
-
-        Returns
-        -------
-        path : str
-        """
-        if self._mmain_path is None:
-            raise ValueError("`mmain_path` is not set!")
-        return self._mmain_path
-
-    @mmain_path.setter
-    def mmain_path(self, path):
-        if path is None:
-            return
-        self._check_directory(path)
-        self._mmain_path = path
-
-    @property
-    def initmatch_path(self):
-        """
-        Path to the folder where the match between the first and final
-        snapshot is stored.
-
-        Returns
-        -------
-        path : str
-        """
-        if self._initmatch_path is None:
-            raise ValueError("`initmatch_path` is not set!")
-        return self._initmatch_path
-
-    @initmatch_path.setter
-    def initmatch_path(self, path):
-        if path is None:
-            return
-        self._check_directory(path)
-        self._initmatch_path = path
-
-    def ic_ids(self, tonew):
-        """
-        CSiBORG IC realisation IDs from the list of folders in `self.srcdir`.
-
-        Parameters
-        ----------
-        tonew : bool
-            If `True`, path to the '_new' ICs is returned.
-        Returns
-        -------
-        ids : 1-dimensional array
-        """
-        files = glob(join(self.srcdir, "ramses_out*"))
-        files = [f.split("/")[-1] for f in files]  # Select only file names
-        if tonew:
-            files = [f for f in files if "_new" in f]
-            ids = [int(f.split("_")[2]) for f in files]  # Take the IC IDs
-        else:
-            files = [f for f in files if "_inv" not in f]  # Remove inv. ICs
-            files = [f for f in files if "_new" not in f]  # Remove _new
-            files = [f for f in files if "OLD" not in f]   # Remove _old
-            ids = [int(f.split("_")[-1]) for f in files]
-            try:
-                ids.remove(5511)
-            except ValueError:
-                pass
-        return numpy.sort(ids)
-
-    def ic_path(self, nsim, tonew=False):
-        """
-        Path to a CSiBORG IC realisation folder.
-
-        Parameters
-        ----------
-        nsim : int
-            IC realisation index.
-        tonew : bool, optional
-            Whether to return the path to the '_new' IC realisation.
-
-        Returns
-        -------
-        path : str
-        """
-        fname = "ramses_out_{}"
-        if tonew:
-            fname += "_new"
-        return join(self.srcdir, fname.format(nsim))
-
-    def get_snapshots(self, nsim):
-        """
-        List of available snapshots of a CSiBORG IC realisation.
-
-        Parameters
-        ----------
-        nsim : int
-            IC realisation index.
-
-        Returns
-        -------
-        snapshots : 1-dimensional array
-        """
-        simpath = self.ic_path(nsim, tonew=False)
-        # Get all files in simpath that start with output_
-        snaps = glob(join(simpath, "output_*"))
-        # Take just the last _00XXXX from each file  and strip zeros
-        snaps = [int(snap.split('_')[-1].lstrip('0')) for snap in snaps]
-        return numpy.sort(snaps)
-
-    def clump0_path(self, nsim):
-        """
-        Path to a single dumped clump's particles. Expected to point to a
-        dictonary whose keys are the clump indices and items structured
-        arrays with the clump's particles in the initial snapshot.
-
-        Parameters
-        ----------
-        nsim : int
-            IC realisation index.
-
-        Returns
-        -------
-        path : str
-        """
-        cdir = join(self.dumpdir, "initmatch")
-        return join(cdir, "clump_{}_{}.npy".format(nsim, "particles"))
-
-    def snapshot_path(self, nsnap, nsim):
-        """
-        Path to a CSiBORG IC realisation snapshot.
-
-        Parameters
-        ----------
-        nsnap : int
-            Snapshot index.
-        nsim : int
-            IC realisation index.
-
-        Returns
-        -------
-        snappath : str
-        """
-        if nsnap == 1:
-            tonew = True
-        simpath = self.ic_path(nsim, tonew=tonew)
-        return join(simpath, "output_{}".format(str(nsnap).zfill(5)))
-
-    def hcat_path(self, nsim):
-        """
-        Path to the final snapshot halo catalogue from `fit_halos.py`.
-
-        Parameters
-        ----------
-        nsim : int
-            IC realisation index.
-
-        Returns
-        -------
-        path : str
-        """
-        nsnap = str(max(self.get_snapshots(nsim))).zfill(5)
-        fname = "ramses_out_{}_{}.npy".format(str(self.nsim).zfill(5), nsnap)
-        return join(self.dumpdir, fname)
-
+from .paths import CSiBORGPaths
+from .utils import cols_to_structured
 
 ###############################################################################
-#                          Fortran readers                                    #
+#                       Fortran particle reader                               #
 ###############################################################################
 
 
@@ -297,12 +41,23 @@ class ParticleReader:
     _paths = None
 
     def __init__(self, paths):
-#        assert isinstance(paths, CSiBORGPaths)
-        self._paths = paths
+        self.paths = paths
 
     @property
     def paths(self):
+        """
+        Paths manager.
+
+        Parameters
+        ----------
+        paths : py:class`csiborgtools.read.CSiBORGPaths`
+        """
         return self._paths
+
+    @paths.setter
+    def paths(self, paths):
+        # assert isinstance(paths, CSiBORGPaths)  # REMOVE
+        self._paths = paths
 
     def read_info(self, nsnap, nsim):
         """
@@ -332,7 +87,7 @@ class ParticleReader:
 
         keys = info[eqs - 1]
         vals = info[eqs + 1]
-        return {key: val for key, val in zip(keys, vals)}
+        return {key: val for key, val in zip(keys, vals, strict=True)}
 
     def open_particle(self, nsnap, nsim, verbose=True):
         """
@@ -392,7 +147,7 @@ class ParticleReader:
     @staticmethod
     def read_sp(dtype, partfile):
         """
-        Utility function to read a single particle file.
+        Read a single particle file.
 
         Parameters
         ----------
@@ -490,7 +245,7 @@ class ParticleReader:
         for cpu in iters:
             i = start_ind[cpu]
             j = nparts[cpu]
-            for (fname, fdtype) in zip(fnames, fdtypes):
+            for (fname, fdtype) in zip(fnames, fdtypes, strict=True):
                 if fname in pars_extract:
                     out[fname][i:i + j] = self.read_sp(fdtype, partfiles[cpu])
                 else:
@@ -522,7 +277,7 @@ class ParticleReader:
         """
         nsnap = str(nsnap).zfill(5)
         cpu = str(cpu + 1).zfill(5)
-        fpath = join(self.paths.ic_path(nsim, to_new=False),
+        fpath = join(self.paths.ic_path(nsim, tonew=False),
                      "output_{}".format(nsnap),
                      "unbinding_{}.out{}".format(nsnap, cpu))
         return FortranFile(fpath)
@@ -561,31 +316,9 @@ class ParticleReader:
 
         return clumpid
 
-    @staticmethod
-    def drop_zero_indx(clump_ids, particles):
-        """
-        Drop from `clump_ids` and `particles` entries whose clump index is 0.
-
-        Parameters
-        ----------
-        clump_ids : 1-dimensional array
-            Array of clump IDs.
-        particles : structured array
-            Array of the particle data.
-
-        Returns
-        -------
-        clump_ids : 1-dimensional array
-            The array of clump IDs after removing zero clump ID entries.
-        particles : structured array
-            The particle data after removing zero clump ID entries.
-        """
-        mask = clump_ids != 0
-        return clump_ids[mask], particles[mask]
-
     def read_clumps(self, nsnap, nsim, cols=None):
         """
-        Read in a clump file `clump_Nsnap.dat`.
+        Read in a clump file `clump_xxXXX.dat`.
 
         Parameters
         ----------
@@ -593,7 +326,6 @@ class ParticleReader:
             Snapshot index.
         nsim : int
             IC realisation index.
-
         cols : list of str, optional.
             Columns to extract. By default `None` and all columns are
             extracted.
@@ -601,84 +333,150 @@ class ParticleReader:
         Returns
         -------
         out : structured array
-            Structured array of the clumps.
         """
         nsnap = str(nsnap).zfill(5)
-        fname = join(self.paths.ic_path(nsim, to_new=False),
+        fname = join(self.paths.ic_path(nsim, tonew=False),
                      "output_{}".format(nsnap),
                      "clump_{}.dat".format(nsnap))
-        # Check the file exists.
         if not isfile(fname):
-            raise FileExistsError(
-                "Clump file `{}` does not exist.".format(fname))
-
-        # Read in the clump array. This is how the columns must be written!
+            raise FileExistsError("Clump file `{}` does not exist."
+                                  .format(fname))
         data = numpy.genfromtxt(fname)
-        clump_cols = [("index", numpy.int64), ("level", numpy.int64),
-                      ("parent", numpy.int64), ("ncell", numpy.float64),
-                      ("peak_x", numpy.float64), ("peak_y", numpy.float64),
-                      ("peak_z", numpy.float64), ("rho-", numpy.float64),
-                      ("rho+", numpy.float64), ("rho_av", numpy.float64),
-                      ("mass_cl", numpy.float64), ("relevance", numpy.float64)]
-        out0 = cols_to_structured(data.shape[0], clump_cols)
-        for i, name in enumerate(out0.dtype.names):
-            out0[name] = data[:, i]
-        # If take all cols then return
-        if cols is None:
-            return out0
-        # Make sure we have a list
+        # How the data is stored in the clump file.
+        clump_cols = {"index":  (0, numpy.int32),
+                      "level": (1, numpy.int32),
+                      "parent": (2, numpy.int32),
+                      "ncell": (3, numpy.float32),
+                      "x": (4, numpy.float32),
+                      "y": (5, numpy.float32),
+                      "z": (6, numpy.float32),
+                      "rho-": (7, numpy.float32),
+                      "rho+": (8, numpy.float32),
+                      "rho_av": (9, numpy.float32),
+                      "mass_cl": (10, numpy.float32),
+                      "relevance": (11, numpy.float32),
+                      }
+        # Return the requested columns.
         cols = [cols] if isinstance(cols, str) else cols
-        # Get the indxs of clump_cols to output
-        clump_names = [col[0] for col in clump_cols]
-        indxs = [None] * len(cols)
-        for i, col in enumerate(cols):
-            if col not in clump_names:
-                raise KeyError("...")
-            indxs[i] = clump_names.index(col)
-        # Make an array and fill it
-        out = cols_to_structured(out0.size, [clump_cols[i] for i in indxs])
-        for name in out.dtype.names:
-            out[name] = out0[name]
+        cols = list(clump_cols.keys()) if cols is None else cols
 
+        dtype = [(col, clump_cols[col][1]) for col in cols]
+        out = cols_to_structured(data.shape[0], dtype)
+        for col in cols:
+            out[col] = data[:, clump_cols[col][0]]
         return out
 
 
 ###############################################################################
-#                       Supplementary reading functions                       #
+#                    Summed substructure catalogue                            #
 ###############################################################################
 
 
-def read_mmain(nsim, srcdir, fname="Mmain_{}.npy"):
+class MmainReader:
     """
-    Read `mmain` numpy arrays of central halos whose mass contains their
-    substracture contribution.
-
-    Parameters
-    ----------
-    nsim : int
-        IC realisation index.
-    srcdir : str
-        Path to the folder containing the files.
-    fname : str, optional
-        File name convention.  By default `Mmain_{}.npy`, where the
-        substituted value is `n`.
-
-    Returns
-    -------
-    out : structured array
-        Array with the central halo information.
+    Object to generate the summed substructure catalogue.
     """
-    fpath = join(srcdir, fname.format(nsim))
-    arr = numpy.load(fpath)
+    _paths = None
 
-    cols = [("index", numpy.int64), ("peak_x", numpy.float64),
-            ("peak_y", numpy.float64), ("peak_z", numpy.float64),
-            ("mass_cl", numpy.float64), ("sub_frac", numpy.float64)]
-    out = cols_to_structured(arr.shape[0], cols)
-    for i, name in enumerate(out.dtype.names):
-        out[name] = arr[:, i]
+    def __init__(self, paths):
+        assert isinstance(paths, CSiBORGPaths)  # REMOVE
+        self._paths = paths
 
-    return out
+    @property
+    def paths(self):
+        return self._paths
+
+    def find_parents(self, clumparr, verbose=False):
+        """
+        Find ultimate parent haloes for every clump in a final snapshot.
+
+        Parameters
+        ----------
+        clumparr : structured array
+            Clump array. Read from `ParticleReader.read_clumps`. Must contain
+            `index` and `parent` columns.
+        verbose : bool, optional
+            Verbosity flag.
+
+        Returns
+        -------
+        parent_arr : 1-dimensional array of shape `(nclumps, )`
+            The ultimate parent halo index for every clump, i.e. referring to
+            its ultimate parent clump.
+        """
+        clindex = clumparr["index"]
+        parindex = clumparr["parent"]
+
+        # The ultimate parent for every clump
+        parent_arr = numpy.zeros(clindex.size, dtype=numpy.int32)
+        for i in trange(clindex.size) if verbose else range(clindex.size):
+            tocont = clindex[i] != parindex[i]  # Continue if not a main halo
+            par = parindex[i]  # First we try the parent of this clump
+            while tocont:
+                # The element of the array corresponding to the parent clump to
+                # the one we're looking at
+                element = numpy.where(clindex == par)[0][0]
+                # We stop if the parent is its own parent, so a main halo. Else
+                # move onto the parent of the parent. Eventually this is its
+                # own parent and we stop, with ultimate parent=par
+                if clindex[element] == clindex[element]:
+                    tocont = False
+                else:
+                    par = parindex[element]
+            parent_arr[i] = par
+
+        return parent_arr
+
+    def make_mmain(self, nsim, verbose=False):
+        """
+        Make the summed substructure catalogue for a final snapshot. Includes
+        the position of the paren, the summed mass and the fraction of mass in
+        substructure.
+
+        Parameters
+        ----------
+        nsim : int
+            IC realisation index.
+        verbose : bool, optional
+            Verbosity flag.
+
+        Returns
+        -------
+        mmain : structured array
+            The `mmain` catalogue.
+        ultimate_parent : 1-dimensional array of shape `(nclumps,)`
+            The ultimate parent halo index for every clump, i.e. referring to
+            its ultimate parent clump.
+        """
+        nsnap = max(self.paths.get_snapshots(nsim))
+        partreader = ParticleReader(self.paths)
+        cols = ["index", "parent", "mass_cl", 'x', 'y', 'z']
+        clumparr = partreader.read_clumps(nsnap, nsim, cols)
+
+        ultimate_parent = self.find_parents(clumparr, verbose=verbose)
+        mask_main = clumparr["index"] == clumparr["parent"]
+        nmain = numpy.sum(mask_main)
+        # Preallocate already the output array
+        out = cols_to_structured(
+            nmain, [("ID", numpy.int32), ("x", numpy.float32),
+                    ("y", numpy.float32), ("z", numpy.float32),
+                    ("M", numpy.float32), ("subfrac", numpy.float32)])
+        out["ID"] = clumparr["index"][mask_main]
+        # Because for these index == parent
+        for p in ('x', 'y', 'z'):
+            out[p] = clumparr[p][mask_main]
+        # We want a total mass for each halo in ID_main
+        for i in range(nmain):
+            # Should include the main halo itself, i.e. its own ultimate parent
+            out["M"][i] = numpy.sum(
+                clumparr["mass_cl"][ultimate_parent == out["ID"][i]])
+
+        out["subfrac"] = 1 - clumparr["mass_cl"][mask_main] / out["M"]
+        return out, ultimate_parent
+
+###############################################################################
+#                       Supplementary reading functions                       #
+###############################################################################
 
 
 def read_initcm(nsim, srcdir, fname="clump_{}_cm.npy"):
@@ -704,7 +502,8 @@ def read_initcm(nsim, srcdir, fname="clump_{}_cm.npy"):
     try:
         return numpy.load(fpath)
     except FileNotFoundError:
-        warn("File {} does not exist.".format(fpath))
+        warn("File {} does not exist.".format(fpath), UserWarning,
+             stacklevel=1)
         return None
 
 

@@ -15,7 +15,8 @@
 """
 Tools for summarising various results.
 """
-from os.path import (join, isfile)
+from os.path import isfile, join
+
 import numpy
 from tqdm import tqdm
 
@@ -26,7 +27,7 @@ class PairOverlap:
 
     Parameters
     ----------
-    cat0, catx: :py:class:`csiborgtools.read.HaloCatalogue`
+    cat0, catx: :py:class:`csiborgtools.read.ClumpsCatalogue`
         Halo catalogues corresponding to the reference and cross
         simulations.
     fskel : str, optional
@@ -121,9 +122,9 @@ class PairOverlap:
         inv_ngp_overlap = [[] for __ in range(cross_size)]
         inv_smoothed_overlap = [[] for __ in range(cross_size)]
         for ref_id in range(match_indxs.size):
-            for cross_id, ngp_cross, smoothed_cross in zip(match_indxs[ref_id],
-                                                           ngp_overlap[ref_id],
-                                                           smoothed_overlap[ref_id]):  # noqa
+            iters = zip(match_indxs[ref_id], ngp_overlap[ref_id],
+                        smoothed_overlap[ref_id], strict=True)
+            for cross_id, ngp_cross, smoothed_cross in iters:
                 inv_match_indxs[cross_id].append(ref_id)
                 inv_ngp_overlap[cross_id].append(ngp_cross)
                 inv_smoothed_overlap[cross_id].append(smoothed_cross)
@@ -198,8 +199,8 @@ class PairOverlap:
 
     def summed_overlap(self, from_smoothed):
         """
-        Summed overlap of each halo in the reference simulation with the cross
-        simulation.
+        Calculate summed overlap of each halo in the reference simulation with
+        the cross simulation.
 
         Parameters
         ----------
@@ -319,7 +320,7 @@ class PairOverlap:
         simulation from the crossed simulation.
 
         Parameters
-        -----------
+        ----------
         from_smoothed : bool
             Whether to use the smoothed overlap or not.
         overlap_threshold : float, optional
@@ -408,7 +409,7 @@ class PairOverlap:
 
         Returns
         -------
-        out : :py:class:`csiborgtools.read.HaloCatalogue` or array
+        out : :py:class:`csiborgtools.read.ClumpsCatalogue` or array
         """
         if key is None:
             return self._cat0
@@ -429,7 +430,7 @@ class PairOverlap:
 
         Returns
         -------
-        out : :py:class:`csiborgtools.read.HaloCatalogue` or array
+        out : :py:class:`csiborgtools.read.ClumpsCatalogue` or array
         """
         if key is None:
             return self._catx
@@ -456,9 +457,9 @@ class NPairsOverlap:
 
     Parameters
     ----------
-    cat0 : :py:class:`csiborgtools.read.HaloCatalogue`
+    cat0 : :py:class:`csiborgtools.read.ClumpsCatalogue`
         Reference simulation halo catalogue.
-    catxs : list of :py:class:`csiborgtools.read.HaloCatalogue`
+    catxs : list of :py:class:`csiborgtools.read.ClumpsCatalogue`
         List of cross simulation halo catalogues.
     fskel : str, optional
         Path to the overlap. By default `None`, i.e.
@@ -478,8 +479,8 @@ class NPairsOverlap:
 
     def summed_overlap(self, from_smoothed, verbose=False):
         """
-        Summed overlap of each halo in the reference simulation with the cross
-        simulations.
+        Calcualte summed overlap of each halo in the reference simulation with
+        the cross simulations.
 
         Parameters
         ----------
@@ -526,7 +527,7 @@ class NPairsOverlap:
         simulation from the crossed simulation.
 
         Parameters
-        -----------
+        ----------
         from_smoothed : bool
             Whether to use the smoothed overlap or not.
         overlap_threshold : float, optional

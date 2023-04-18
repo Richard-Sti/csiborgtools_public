@@ -16,16 +16,18 @@
 MPI script to calculate the matter cross power spectrum between CSiBORG
 IC realisations. Units are Mpc/h.
 """
-from gc import collect
 from argparse import ArgumentParser
+from datetime import datetime
+from gc import collect
+from itertools import combinations
 from os import remove
 from os.path import join
-from itertools import combinations
-from datetime import datetime
-import numpy
+
 import joblib
-from mpi4py import MPI
+import numpy
 import Pk_library as PKL
+from mpi4py import MPI
+
 try:
     import csiborgtools
 except ModuleNotFoundError:
@@ -47,9 +49,9 @@ nproc = comm.Get_size()
 MAS = "CIC"  # mass asignment scheme
 
 paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
-box = csiborgtools.units.BoxUnits(paths)
+box = csiborgtools.read.BoxUnits(paths)
 reader = csiborgtools.read.ParticleReader(paths)
-ics = paths.ic_ids(tonew=False)
+ics = paths.get_ics(tonew=False)
 nsims = len(ics)
 
 # File paths
@@ -59,7 +61,7 @@ fout = join(dumpdir, "crosspk",
             "out_{}_{}" + "_{}.p".format(args.halfwidth))
 
 
-jobs = csiborgtools.fits.split_jobs(nsims, nproc)[rank]
+jobs = csiborgtools.utils.split_jobs(nsims, nproc)[rank]
 for n in jobs:
     print("Rank {}@{}: saving {}th delta.".format(rank, datetime.now(), n))
     nsim = ics[n]
@@ -99,7 +101,7 @@ for i in range(nsims):
     combs.append((i, i))
 prev_delta = [-1, None, None, None]  # i, delta, aexp, length
 
-jobs = csiborgtools.fits.split_jobs(len(combs), nproc)[rank]
+jobs = csiborgtools.utils.split_jobs(len(combs), nproc)[rank]
 for n in jobs:
     i, j = combs[n]
     print("Rank {}@{}: combination {}.".format(rank, datetime.now(), (i, j)))

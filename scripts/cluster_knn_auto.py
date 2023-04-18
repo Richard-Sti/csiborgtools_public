@@ -13,17 +13,18 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """A script to calculate the KNN-CDF for a set of CSiBORG halo catalogues."""
-from os.path import join
-from warnings import warn
 from argparse import ArgumentParser
 from copy import deepcopy
 from datetime import datetime
-from mpi4py import MPI
-from TaskmasterMPI import master_process, worker_process
-import numpy
-from sklearn.neighbors import NearestNeighbors
+from warnings import warn
+
 import joblib
+import numpy
 import yaml
+from mpi4py import MPI
+from sklearn.neighbors import NearestNeighbors
+from TaskmasterMPI import master_process, worker_process
+
 try:
     import csiborgtools
 except ModuleNotFoundError:
@@ -58,14 +59,13 @@ ics = [7444, 7468, 7492, 7516, 7540, 7564, 7588, 7612, 7636, 7660, 7684,
        9292, 9316, 9340, 9364, 9388, 9412, 9436, 9460, 9484, 9508, 9532,
        9556, 9580, 9604, 9628, 9652, 9676, 9700, 9724, 9748, 9772, 9796,
        9820, 9844]
-dumpdir = "/mnt/extraspace/rstiskalek/csiborg/knn"
-fout = join(dumpdir, "auto", "knncdf_{}_{}.p")
 paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
 knncdf = csiborgtools.clustering.kNN_CDF()
 
 ###############################################################################
 #                                 Analysis                                    #
 ###############################################################################
+
 
 def read_single(selection, cat):
     """Positions for single catalogue auto-correlation."""
@@ -101,11 +101,13 @@ def read_single(selection, cat):
 
     return pos[smask, ...]
 
+
 def do_auto(run, cat, ic):
     """Calculate the kNN-CDF single catalgoue autocorrelation."""
     _config = config.get(run, None)
     if _config is None:
-        warn("No configuration for run {}.".format(run))
+        warn("No configuration for run {}.".format(run), UserWarning,
+             stacklevel=1)
         return
 
     rvs_gen = csiborgtools.clustering.RVSinsphere(Rmax)
@@ -119,13 +121,15 @@ def do_auto(run, cat, ic):
         batch_size=int(config["batch_size"]), random_state=config["seed"])
 
     joblib.dump({"rs": rs, "cdf": cdf, "ndensity": pos.shape[0] / totvol},
-                fout.format(str(ic).zfill(5), run))
+                paths.knnauto_path(run,  ic))
+
 
 def do_cross_rand(run, cat, ic):
     """Calculate the kNN-CDF cross catalogue random correlation."""
     _config = config.get(run, None)
     if _config is None:
-        warn("No configuration for run {}.".format(run))
+        warn("No configuration for run {}.".format(run), UserWarning,
+             stacklevel=1)
         return
 
     rvs_gen = csiborgtools.clustering.RVSinsphere(Rmax)
@@ -143,14 +147,11 @@ def do_cross_rand(run, cat, ic):
         nsamples=int(config["nsamples"]), neval=int(config["neval"]),
         batch_size=int(config["batch_size"]), random_state=config["seed"])
     corr = knncdf.joint_to_corr(cdf0, cdf1, joint_cdf)
-
-    joblib.dump({"rs": rs, "corr": corr}, fout.format(str(ic).zfill(5), run))
-
+    joblib.dump({"rs": rs, "corr": corr}, paths.knnauto_path(run, ic))
 
 
 def do_runs(ic):
-    cat = csiborgtools.read.HaloCatalogue(ic, paths, max_dist=Rmax,
-                                          min_mass=minmass)
+    cat = csiborgtools.read.ClumpsCatalogue(ic, paths, maxdist=Rmax)
     for run in args.runs:
         if "random" in run:
             do_cross_rand(run, cat, ic)
