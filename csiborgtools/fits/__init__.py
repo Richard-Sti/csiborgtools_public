@@ -14,3 +14,4 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 from .halo import Clump, Halo  # noqa
 from .haloprofile import NFWPosterior, NFWProfile  # noqa
+from .utils import split_jobs  # noqa

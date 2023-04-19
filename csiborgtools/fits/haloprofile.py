@@ -50,7 +50,7 @@ class NFWProfile:
         density : 1-dimensional array
         """
         x = r / Rs
-        return rho0 / (x * (1 + x)**2)
+        return rho0 / (x * (1 + x) ** 2)
 
     @staticmethod
     def _logprofile(r, Rs, rho0):
@@ -153,7 +153,7 @@ class NFWProfile:
         samples : float or 1-dimensional array
             Samples following the NFW profile.
         """
-        gen = uniform(rmin, rmax-rmin)
+        gen = uniform(rmin, rmax - rmin)
         samples = numpy.full(size, numpy.nan)
         for i in range(size):
             while True:
@@ -186,9 +186,6 @@ class NFWPosterior(NFWProfile):
     clump : `Clump`
         Clump object containing the particles and clump information.
     """
-
-    def __init__(self):
-        super().__init__()
 
     @property
     def clump(self):
@@ -228,7 +225,7 @@ class NFWPosterior(NFWProfile):
         -------
         rho0: float
         """
-        return mass / self.bounded_enclosed_mass(rmin, rmax, Rs, 1)
+        return mass / self.bounded_mass(rmin, rmax, Rs, 1)
 
     def initlogRs(self, r, rmin, rmax, binsguess=10):
         r"""
@@ -255,7 +252,6 @@ class NFWPosterior(NFWProfile):
         counts, edges = numpy.histogram(r, bins)
         return numpy.log10(edges[numpy.argmax(counts)])
 
-
     def logprior(self, logRs, rmin, rmax):
         r"""
         Logarithmic uniform prior on :math:`\log R_{\rm s}`. Unnormalised but
@@ -275,8 +271,8 @@ class NFWPosterior(NFWProfile):
         lp : float
         """
         if not rmin < 10**logRs < rmax:
-            return - numpy.infty
-        return 0.
+            return -numpy.infty
+        return 0.0
 
     def loglikelihood(self, logRs, r, rmin, rmax, npart):
         """
@@ -303,7 +299,6 @@ class NFWPosterior(NFWProfile):
         mnfw = self.bounded_mass(rmin, rmax, Rs, 1)
         return numpy.sum(self._logprofile(r, Rs, 1)) - npart * numpy.log(mnfw)
 
-
     def __call__(self, logRs, r, rmin, rmax, npart):
         """
         Logarithmic posterior. Sum of the logarithmic prior and likelihood.
@@ -327,7 +322,7 @@ class NFWPosterior(NFWProfile):
         """
         lp = self.logprior(logRs, rmin, rmax)
         if not numpy.isfinite(lp):
-            return - numpy.infty
+            return -numpy.infty
         return self.loglikelihood(logRs, r, rmin, rmax, npart) + lp
 
     def fit(self, clump, eps=1e-4):
@@ -353,18 +348,20 @@ class NFWPosterior(NFWProfile):
             Best fit NFW central density.
         """
         assert isinstance(clump, Clump)
-        r = clump.r
+        r = clump.r()
         rmin = numpy.min(r)
         rmax, mtot = clump.spherical_overdensity_mass(200)
-        npart = numpy.sum((rmin <= r) & (r <= rmax))
+        mask = (rmin <= r) & (r <= rmax)
+        npart = numpy.sum(mask)
+        r = r[mask]
 
         # Loss function to optimize
         def loss(logRs):
-            return - self(logRs, r, rmin, rmax, npart)
+            return -self(logRs, r, rmin, rmax, npart)
 
         res = minimize_scalar(
-            loss, bounds=(numpy.log10(rmin), numpy.log10(rmax)),
-            method='bounded')
+            loss, bounds=(numpy.log10(rmin), numpy.log10(rmax)), method="bounded"
+        )
 
         if numpy.log10(rmax) - res.x < eps:
             res.success = False

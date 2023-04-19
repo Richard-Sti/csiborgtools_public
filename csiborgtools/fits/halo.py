@@ -22,6 +22,7 @@ class BaseStructure(ABC):
     """
     Basic structure object for handling operations on its particles.
     """
+
     _particles = None
     _info = None
     _box = None
@@ -39,7 +40,7 @@ class BaseStructure(ABC):
 
     @particles.setter
     def particles(self, particles):
-        pars = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'M']
+        pars = ["x", "y", "z", "vx", "vy", "vz", "M"]
         assert all(p in particles.dtype.names for p in pars)
         self._particles = particles
 
@@ -73,7 +74,7 @@ class BaseStructure(ABC):
     @box.setter
     def box(self, box):
         try:
-            assert box._name  == "box_units"
+            assert box._name == "box_units"
             self._box = box
         except AttributeError as err:
             raise TypeError from err
@@ -87,19 +88,8 @@ class BaseStructure(ABC):
         -------
         pos : 2-dimensional array of shape `(n_particles, 3)`.
         """
-        ps = ('x', 'y', 'z')
+        ps = ("x", "y", "z")
         return numpy.vstack([self[p] - self.info[p] for p in ps]).T
-
-    @property
-    def r(self):
-        """
-        Radial separation of the particles from the centre of the object.
-
-        Returns
-        -------
-        r : 1-dimensional array of shape `(n_particles, )`.
-        """
-        return numpy.linalg.norm(self.pos, axis=1)
 
     @property
     def vel(self):
@@ -112,34 +102,61 @@ class BaseStructure(ABC):
         """
         return numpy.vstack([self[p] for p in ("vx", "vy", "vz")]).T
 
-    @property
-    def cmass(self):
+    def r(self):
         """
-        Cartesian position components of the object's centre of mass. Note that
-        this is already in a frame centered at the clump's potential minimum,
-        so its distance from origin indicates the separation of the centre of
-        mass and potential minimum.
+        Calculate the radial separation of the particles from the centre of the
+        object.
+
+        Returns
+        -------
+        r : 1-dimensional array of shape `(n_particles, )`.
+        """
+        return numpy.linalg.norm(self.pos, axis=1)
+
+    def cmass(self, rmax, rmin):
+        """
+        Calculate Cartesian position components of the object's centre of mass.
+        Note that this is already in a frame centered at the clump's potential
+        minimum, so its distance from origin indicates the separation of the
+        centre of mass and potential minimum.
+
+        Parameters
+        ----------
+        rmax : float
+            Maximum radius for particles to be included in the calculation.
+        rmin : float
+            Minimum radius for particles to be included in the calculation.
 
         Returns
         -------
         cm : 1-dimensional array of shape `(3, )`
         """
-        return numpy.average(self.pos, axis=0, weights=self['M'])
+        r = self.r()
+        mask = (r >= rmin) & (r <= rmax)
+        return numpy.average(self.pos[mask], axis=0, weights=self["M"][mask])
 
-    @property
-    def angular_momentum(self):
+    def angular_momentum(self, rmax, rmin=0):
         """
-        Angular momentum in the box coordinates.
+        Calculate angular momentum in the box coordinates.
 
-        NOTE: here also change velocities to the CM and appropriately edit the
-        docs.
+        Parameters
+        ----------
+        rmax : float
+            Maximum radius for particles to be included in the calculation.
+        rmin : float
+            Minimum radius for particles to be included in the calculation.
 
         Returns
         -------
         J : 1-dimensional array or shape `(3, )`
         """
-        J = numpy.cross(self.pos - self.cmass, self.vel)
-        return numpy.einsum("i,ij->j", self.m, J)
+        r = self.r()
+        mask = (r >= rmin) & (r <= rmax)
+        pos = self.pos[mask] - self.cmass(rmax, rmin)
+        # Velocitities in the object CM frame
+        vel = self.vel[mask]
+        vel -= numpy.average(self.vel[mask], axis=0, weights=self["M"][mask])
+        return numpy.einsum("i,ij->j", self["M"][mask], numpy.cross(pos, vel))
 
     def enclosed_mass(self, rmax, rmin=0):
         """
@@ -156,8 +173,8 @@ class BaseStructure(ABC):
         -------
         enclosed_mass : float
         """
-        r = self.r
-        return numpy.sum(self['M'][(r >= rmin) & (r <= rmax)])
+        r = self.r()
+        return numpy.sum(self["M"][(r >= rmin) & (r <= rmax)])
 
     def lambda_bullock(self, radius, npart_min=10):
         r"""
@@ -182,19 +199,21 @@ class BaseStructure(ABC):
         Bullock, J. S.;  Dekel, A.;  Kolatt, T. S.;  Kravtsov, A. V.;
         Klypin, A. A.;  Porciani, C.;  Primack, J. R.
         """
-        mask = self.r <= radius
+        mask = self.r() <= radius
         if numpy.sum(mask) < npart_min:
             return numpy.nan
         mass = self.enclosed_mass(radius)
         V = numpy.sqrt(self.box.box_G * mass / radius)
-        return (numpy.linalg.norm(self.angular_momentum[mask])
-                / (numpy.sqrt(2) * mass * V * radius))
+        return numpy.linalg.norm(self.angular_momentum(radius)) / (
+            numpy.sqrt(2) * mass * V * radius
+        )
 
-    def spherical_overdensity_mass(self, delta_mult, npart_min=10):
+    def spherical_overdensity_mass(self, delta_mult, npart_min=10, kind="crit"):
         r"""
         Calculate spherical overdensity mass and radius. The mass is defined as
         the enclosed mass within an outermost radius where the mean enclosed
-        spherical density reaches a multiple of the critical density `delta`.
+        spherical density reaches a multiple of the critical density `delta`
+        (times the matter density if `kind` is `matter`).
 
         Parameters
         ----------
@@ -203,6 +222,8 @@ class BaseStructure(ABC):
         npart_min : int
             Minimum number of enclosed particles for a radius to be
             considered trustworthy.
+        kind : str
+            Either `crit` or `matter`, for critical or matter overdensity
 
         Returns
         -------
@@ -211,17 +232,25 @@ class BaseStructure(ABC):
         mx :  float
             Corresponding spherical enclosed mass.
         """
+        # Quick check of inputs
+        assert kind in ["crit", "matter"]
+
         # We first sort the particles in an increasing separation
-        rs = self.r
+        rs = self.r()
         order = numpy.argsort(rs)
         rs = rs[order]
-        cmass = numpy.cumsum(self['M'])  # Cumulative mass
+        cmass = numpy.cumsum(self["M"][order])  # Cumulative mass
         # We calculate the enclosed volume and indices where it is above target
-        vol = 4 * numpy.pi / 3 * (rs**3 - rs[0]**3)
-        ks = numpy.where([cmass / vol > delta_mult * self.box.rhoc])[0]
+        vol = 4 * numpy.pi / 3 * (rs**3 - rs[0] ** 3)
+
+        target_density = delta_mult * self.box.box_rhoc
+        if kind == "matter":
+            target_density *= self.box.cosmo.Om0
+        with numpy.errstate(divide="ignore"):
+            ks = numpy.where(cmass / vol > target_density)[0]
         if ks.size == 0:  # Never above the threshold?
             return numpy.nan, numpy.nan
-        k = numpy.maximum(ks)
+        k = numpy.max(ks)
         if k < npart_min:  # Too few particles?
             return numpy.nan, numpy.nan
         return rs[k], cmass[k]
@@ -235,7 +264,7 @@ class BaseStructure(ABC):
         -------
         key : list of str
         """
-        return self.data.dtype.names
+        return self.particles.dtype.names
 
     def __getitem__(self, key):
         if key not in self.keys:
@@ -259,6 +288,7 @@ class Clump(BaseStructure):
     box : :py:class:`csiborgtools.read.BoxUnits`
         Box units object.
     """
+
     def __init__(self, particles, info, box):
         self.particles = particles
         self.info = info
@@ -279,6 +309,7 @@ class Halo(BaseStructure):
     box : :py:class:`csiborgtools.read.BoxUnits`
         Box units object.
     """
+
     def __init__(self, particles, info, box):
         self.particles = particles
         self.info = info

@@ -1,4 +1,4 @@
-# Copyright (C) 2022 Richard Stiskalek
+# Copyright (C) 2022 Richard Stiskalek, Deaglan Bartlett
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation; either version 3 of the License, or (at your
@@ -12,19 +12,32 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-from .box_units import BoxUnits  # noqa
-from .halo_cat import ClumpsCatalogue, HaloCatalogue  # noqa
-from .knn_summary import kNNCDFReader  # noqa
-from .obs import (  # noqa
-    SDSS,
-    MCXCClusters,
-    PlanckClusters,
-    TwoMPPGalaxies,
-    TwoMPPGroups,
-)
-from .overlap_summary import NPairsOverlap, PairOverlap, binned_resample_mean  # noqa
-from .paths import CSiBORGPaths  # noqa
-from .pk_summary import PKReader  # noqa
-from .readsim import MmainReader, ParticleReader, halfwidth_select, read_initcm  # noqa
-from .tpcf_summary import TPCFReader  # noqa
-from .utils import cartesian_to_radec, cols_to_structured, radec_to_cartesian  # noqa
+"""Fitting utility functions."""
+
+import numpy
+
+
+def split_jobs(njobs, ncpu):
+    """
+    Split `njobs` amongst `ncpu`.
+
+    Parameters
+    ----------
+    njobs : int
+        Number of jobs.
+    ncpu : int
+        Number of CPUs.
+
+    Returns
+    -------
+    jobs : list of lists of integers
+        Outer list of each CPU and inner lists for CPU's jobs.
+    """
+    njobs_per_cpu, njobs_remainder = divmod(njobs, ncpu)
+    jobs = numpy.arange(njobs_per_cpu * ncpu).reshape((njobs_per_cpu, ncpu)).T
+
+    jobs = jobs.tolist()
+    for i in range(njobs_remainder):
+        jobs[i].append(njobs_per_cpu * ncpu + i)
+
+    return jobs
