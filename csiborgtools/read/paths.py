@@ -133,13 +133,13 @@ class CSiBORGPaths:
         nsim : int
             IC realisation index.
         kind : str
-            Type of match.  Can be either `cm` or `particles`.
+            Type of match.  Can be either `fit` or `particles`.
 
         Returns
         -------
         path : str
         """
-        assert kind in ["cm", "particles"]
+        assert kind in ["fit", "particles"]
         fdir = join(self.postdir, "initmatch")
         if not isdir(fdir):
             mkdir(fdir)
@@ -282,6 +282,28 @@ class CSiBORGPaths:
             warn("Created directory `{}`.".format(fdir), UserWarning, stacklevel=1)
 
         fname = "{}_out_{}_{}.npy".format(kind, str(nsim).zfill(5), str(nsnap).zfill(5))
+        return join(fdir, fname)
+
+    def overlap_path(self, nsim0, nsimx):
+        """
+        Path to the overlap files between two simulations.
+
+        Parameters
+        ----------
+        nsim0 : int
+            IC realisation index of the first simulation.
+        nsimx : int
+            IC realisation index of the second simulation.
+
+        Returns
+        -------
+        path : str
+        """
+        fdir = join(self.postdir, "overlap")
+        if not isdir(fdir):
+            mkdir(fdir)
+            warn("Created directory `{}`.".format(fdir), UserWarning, stacklevel=1)
+        fname = "ovelrap_{}_{}.npz".format(str(nsim0).zfill(5), str(nsimx).zfill(5))
         return join(fdir, fname)
 
     def knnauto_path(self, run, nsim=None):

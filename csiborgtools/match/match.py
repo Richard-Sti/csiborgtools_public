@@ -16,14 +16,11 @@
 Support for matching halos between CSiBORG IC realisations.
 """
 from datetime import datetime
-from gc import collect
 
 import numpy
 from numba import jit
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm, trange
-
-from .utils import concatenate_clumps
 
 ###############################################################################
 #                  Realisations matcher for calculating overlaps              #
@@ -32,9 +29,7 @@ from .utils import concatenate_clumps
 
 class RealisationsMatcher:
     """
-    A tool to match halos between IC realisations. Looks for halos 3D space
-    neighbours in all remaining IC realisations that are within some mass
-    range of it.
+    A tool to match halos between IC realisations.
 
     Parameters
     ----------
@@ -49,12 +44,13 @@ class RealisationsMatcher:
         catalogue key. By default `totpartmass`, i.e. the total particle
         mass associated with a halo.
     """
+
     _nmult = None
     _dlogmass = None
     _mass_kind = None
     _overlapper = None
 
-    def __init__(self, nmult=1., dlogmass=2., mass_kind="totpartmass"):
+    def __init__(self, nmult=1.0, dlogmass=2.0, mass_kind="totpartmass"):
         assert nmult > 0
         assert dlogmass > 0
         assert isinstance(mass_kind, str)
@@ -109,12 +105,13 @@ class RealisationsMatcher:
         """
         return self._overlapper
 
-    def cross(self, cat0, catx, clumps0, clumpsx, delta_bckg, verbose=True):
+    def cross(
+        self, cat0, catx, halos0_archive, halosx_archive, delta_bckg, verbose=True
+    ):
         r"""
         Find all neighbours whose CM separation is less than `nmult` times the
-        sum of their initial Lagrangian patch sizes and optionally calculate
-        their overlap. Enforces that the neighbours' are similar in mass up to
-        `dlogmass` dex.
+        sum of their initial Lagrangian patch sizes and calculate their overlap.
+        Enforces that the neighbours' are similar in mass up to `dlogmass` dex.
 
         Parameters
         ----------
@@ -122,14 +119,14 @@ class RealisationsMatcher:
             Halo catalogue of the reference simulation.
         catx : :py:class:`csiborgtools.read.ClumpsCatalogue`
             Halo catalogue of the cross simulation.
-        clumps0 : list of structured arrays
-            List of clump structured arrays of the reference simulation, keys
-            must include `x`, `y`, `z` and `M`. The positions must already be
-            converted to cell numbers.
-        clumpsx : list of structured arrays
-            List of clump structured arrays of the cross simulation, keys must
-            include `x`, `y`, `z` and `M`. The positions must already be
-            converted to cell numbers.
+        halos0_archive : `NpzFile` object
+            Archive of halos' particles of the reference simulation, keys must
+            include `x`, `y`, `z` and `M`. The positions must already be converted
+            to cell numbers.
+        halosx_archive : `NpzFile` object
+            Archive of halos' particles of the cross simulation, keys must
+            include `x`, `y`, `z` and `M`. The positions must already be converted
+            to cell numbers.
         delta_bckg : 3-dimensional array
             Summed background density field of the reference and cross
             simulations calculated with particles assigned to halos at the
@@ -140,24 +137,27 @@ class RealisationsMatcher:
 
         Returns
         -------
-        ref_indxs : 1-dimensional array
-            Halo IDs in the reference catalogue.
-        cross_indxs : 1-dimensional array
-            Halo IDs in the cross catalogue.
         match_indxs : 1-dimensional array of arrays
-            Indices of halo counterparts in the cross catalogue.
+            The outer array corresponds to halos in the reference catalogue, the
+            inner array corresponds to the array positions of matches in the cross
+            catalogue.
         overlaps : 1-dimensional array of arrays
-            Overlaps with the cross catalogue.
+            Overlaps with the cross catalogue. Follows similar pattern as `match_indxs`.
         """
-        # Query the KNN
-        verbose and print("{}: querying the KNN."
-                          .format(datetime.now()), flush=True)
+        # We begin by querying the kNN for the nearest neighbours of each halo
+        # in the reference simulation from the cross simulation in the initial
+        # snapshot.
+        verbose and print("{}: querying the KNN.".format(datetime.now()), flush=True)
         match_indxs = radius_neighbours(
-            catx.knn(select_initial=True), cat0.positions(in_initial=True),
-            radiusX=cat0["lagpatch"], radiusKNN=catx["lagpatch"],
-            nmult=self.nmult, enforce_in32=True, verbose=verbose)
-
-        # Remove neighbours whose mass is too large/small
+            catx.knn(select_initial=True),
+            cat0.positions(in_initial=True),
+            radiusX=cat0["lagpatch"],
+            radiusKNN=catx["lagpatch"],
+            nmult=self.nmult,
+            enforce_int32=True,
+            verbose=verbose,
+        )
+        # We next remove neighbours whose mass is too large/small.
         if self.dlogmass is not None:
             for i, indx in enumerate(match_indxs):
                 # |log(M1 / M2)|
@@ -165,68 +165,103 @@ class RealisationsMatcher:
                 aratio = numpy.abs(numpy.log10(catx[p][indx] / cat0[p][i]))
                 match_indxs[i] = match_indxs[i][aratio < self.dlogmass]
 
-        # Min and max cells along each axis for each halo
-        limkwargs = {"ncells": self.overlapper.inv_clength,
-                     "nshift": self.overlapper.nshift}
-        mins0, maxs0 = get_clumplims(clumps0, **limkwargs)
-        minsx, maxsx = get_clumplims(clumpsx, **limkwargs)
-
-        # Mapping from a halo index to the list of clumps
-        hid2clumps0 = {hid: n for n, hid in enumerate(clumps0["ID"])}
-        hid2clumpsx = {hid: n for n, hid in enumerate(clumpsx["ID"])}
-
+        # We will make a dictionary to keep in memory the halos' particles from the
+        # cross simulations so that they are not loaded in several times and we only
+        # convert their positions to cells once. Possibly make an option to not do
+        # this to lower memory requirements?
+        cross_halos = {}
+        cross_lims = {}
         cross = [numpy.asanyarray([], dtype=numpy.float32)] * match_indxs.size
-        # Loop only over halos that have neighbours
-        iters = numpy.arange(len(cat0))[[x.size > 0 for x in match_indxs]]
-        for i in tqdm(iters) if verbose else iters:
-            match0 = hid2clumps0[cat0["index"][i]]
-            # The clump, its mass and mins & maxs
-            cl0 = clumps0["clump"][match0]
-            mass0 = numpy.sum(cl0['M'])
-            mins0_current, maxs0_current = mins0[match0], maxs0[match0]
-
-            # Preallocate arrays to store overlap information
-            _cross = numpy.full(match_indxs[i].size, numpy.nan,
-                                dtype=numpy.float32)
-            # Loop over matches of this halo from the other simulation
-            for j, ind in enumerate(match_indxs[i]):
-                matchx = hid2clumpsx[catx["index"][ind]]
-                clx = clumpsx["clump"][matchx]
+        for i, k0 in enumerate(tqdm(cat0["index"]) if verbose else cat0["index"]):
+            # If we have no matches continue to the next halo.
+            matches = match_indxs[i]
+            if matches.size == 0:
+                continue
+            # Next, we find this halo's particles, total mass and minimum/maximum cells
+            # and convert positions to cells.
+            halo0 = halos0_archive[str(k0)]
+            mass0 = numpy.sum(halo0["M"])
+            mins0, maxs0 = get_halolims(
+                halo0, ncells=self.overlapper.inv_clength, nshift=self.overlapper.nshift
+            )
+            for p in ("x", "y", "z"):
+                halo0[p] = self.overlapper.pos2cell(halo0[p])
+            # We now loop over matches of this halo and calculate their overlap,
+            # storing them in `_cross`.
+            _cross = numpy.full(matches.size, numpy.nan, dtype=numpy.float32)
+            for j, kf in enumerate(catx["index"][matches]):
+                # Attempt to load this cross halo from memory, if it fails get it from
+                # from the halo archive (and similarly for the limits) and convert the
+                # particle positions to cells.
+                try:
+                    halox = cross_halos[kf]
+                    minsx, maxsx = cross_lims[kf]
+                except KeyError:
+                    halox = halosx_archive[str(kf)]
+                    minsx, maxsx = get_halolims(
+                        halox,
+                        ncells=self.overlapper.inv_clength,
+                        nshift=self.overlapper.nshift,
+                    )
+                    for p in ("x", "y", "z"):
+                        halox[p] = self.overlapper.pos2cell(halox[p])
+                    cross_halos[kf] = halox
+                    cross_lims[kf] = (minsx, maxsx)
+                massx = numpy.sum(halox["M"])
                 _cross[j] = self.overlapper(
-                    cl0, clx, delta_bckg, mins0_current, maxs0_current,
-                    minsx[matchx], maxsx[matchx], mass1=mass0,
-                    mass2=numpy.sum(clx['M']))
+                    halo0,
+                    halox,
+                    delta_bckg,
+                    mins0,
+                    maxs0,
+                    minsx,
+                    maxsx,
+                    mass1=mass0,
+                    mass2=massx,
+                )
             cross[i] = _cross
 
-            # Remove matches with exactly 0 overlap
+            # We remove all matches that have zero overlap to save space.
             mask = cross[i] > 0
             match_indxs[i] = match_indxs[i][mask]
             cross[i] = cross[i][mask]
-
-            # Sort the matches by overlap
+            # And finally we sort the matches by their overlap.
             ordering = numpy.argsort(cross[i])[::-1]
             match_indxs[i] = match_indxs[i][ordering]
             cross[i] = cross[i][ordering]
 
         cross = numpy.asanyarray(cross, dtype=object)
-        return cat0["index"], catx["index"], match_indxs, cross
+        return match_indxs, cross
 
-    def smoothed_cross(self, clumps0, clumpsx, delta_bckg, ref_indxs,
-                       cross_indxs, match_indxs, smooth_kwargs, verbose=True):
+    def smoothed_cross(
+        self,
+        cat0,
+        catx,
+        halos0_archive,
+        halosx_archive,
+        delta_bckg,
+        match_indxs,
+        smooth_kwargs,
+        verbose=True,
+    ):
         r"""
         Calculate the smoothed overlaps for pair previously identified via
         `self.cross(...)` to have a non-zero overlap.
 
         Parameters
         ----------
-        clumps0 : list of structured arrays
-            List of clump structured arrays of the reference simulation, keys
-            must include `x`, `y`, `z` and `M`. The positions must already be
-            converted to cell numbers.
-        clumpsx : list of structured arrays
-            List of clump structured arrays of the cross simulation, keys must
-            include `x`, `y`, `z` and `M`. The positions must already be
-            converted to cell numbers.
+        cat0 : :py:class:`csiborgtools.read.ClumpsCatalogue`
+            Halo catalogue of the reference simulation.
+        catx : :py:class:`csiborgtools.read.ClumpsCatalogue`
+            Halo catalogue of the cross simulation.
+        halos0_archive : `NpzFile` object
+            Archive of halos' particles of the reference simulation, keys must
+            include `x`, `y`, `z` and `M`. The positions must already be converted
+            to cell numbers.
+        halosx_archive : `NpzFile` object
+            Archive of halos' particles of the cross simulation, keys must
+            include `x`, `y`, `z` and `M`. The positions must already be converted
+            to cell numbers.
         delta_bckg : 3-dimensional array
             Smoothed summed background density field of the reference and cross
             simulations calculated with particles assigned to halos at the
@@ -247,33 +282,45 @@ class RealisationsMatcher:
         -------
         overlaps : 1-dimensional array of arrays
         """
-        # Min and max cells along each axis for each halo
-        limkwargs = {"ncells": self.overlapper.inv_clength,
-                     "nshift": self.overlapper.nshift}
-        mins0, maxs0 = get_clumplims(clumps0, **limkwargs)
-        minsx, maxsx = get_clumplims(clumpsx, **limkwargs)
 
-        hid2clumps0 = {hid: n for n, hid in enumerate(clumps0["ID"])}
-        hid2clumpsx = {hid: n for n, hid in enumerate(clumpsx["ID"])}
-
-        # Preallocate arrays to store the overlap information
+        cross_halos = {}
+        cross_lims = {}
         cross = [numpy.asanyarray([], dtype=numpy.float32)] * match_indxs.size
-        for i, ref_ind in enumerate(tqdm(ref_indxs) if verbose else ref_indxs):
-            match0 = hid2clumps0[ref_ind]
-            # The reference clump, its mass and mins & maxs
-            cl0 = clumps0["clump"][match0]
-            mins0_current, maxs0_current = mins0[match0], maxs0[match0]
 
-            # Preallocate
-            nmatches = match_indxs[i].size
-            _cross = numpy.full(nmatches, numpy.nan, numpy.float32)
-            for j, match_ind in enumerate(match_indxs[i]):
-                matchx = hid2clumpsx[cross_indxs[match_ind]]
-                clx = clumpsx["clump"][matchx]
+        for i, k0 in enumerate(tqdm(cat0["index"]) if verbose else cat0["index"]):
+            halo0 = halos0_archive[str(k0)]
+            mins0, maxs0 = get_halolims(
+                halo0, ncells=self.overlapper.inv_clength, nshift=self.overlapper.nshift
+            )
+
+            # Now loop over the matches and calculate the smoothed overlap.
+            _cross = numpy.full(match_indxs[i].size, numpy.nan, numpy.float32)
+            for j, kf in enumerate(catx["index"][match_indxs[i]]):
+                # Attempt to load this cross halo from memory, if it fails get it from
+                # from the halo archive (and similarly for the limits).
+                try:
+                    halox = cross_halos[kf]
+                    minsx, maxsx = cross_lims[kf]
+                except KeyError:
+                    halox = halosx_archive[str(kf)]
+                    minsx, maxsx = get_halolims(
+                        halox,
+                        ncells=self.overlapper.inv_clength,
+                        nshift=self.overlapper.nshift,
+                    )
+                    cross_halos[kf] = halox
+                    cross_lims[kf] = (minsx, maxsx)
+
                 _cross[j] = self.overlapper(
-                    cl0, clx, delta_bckg, mins0_current,
-                    maxs0_current, minsx[matchx], maxsx[matchx],
-                    smooth_kwargs=smooth_kwargs)
+                    halo0,
+                    halox,
+                    delta_bckg,
+                    mins0,
+                    maxs0,
+                    minsx,
+                    maxsx,
+                    smooth_kwargs=smooth_kwargs,
+                )
             cross[i] = _cross
 
         return numpy.asanyarray(cross, dtype=object)
@@ -321,6 +368,7 @@ class ParticleOverlap:
     the nearest grid position particle assignment scheme, with optional
     Gaussian smoothing.
     """
+
     def __init__(self):
         # Inverse cell length in box units. By default :math:`2^11`, which
         # matches the initial RAMSES grid resolution.
@@ -346,92 +394,63 @@ class ParticleOverlap:
         # Check whether this is already the cell
         if pos.dtype.char in numpy.typecodes["AllInteger"]:
             return pos
-        return numpy.floor(pos * self.inv_clength).astype(int)
+        return numpy.floor(pos * self.inv_clength).astype(numpy.int32)
 
-    def clumps_pos2cell(self, clumps):
+    def make_bckg_delta(self, halo_archive, delta=None, verbose=False):
         """
-        Convert clump positions directly to cell IDs. Useful to speed up
-        subsequent calculations. Overwrites the passed in arrays.
+        Calculate a NGP density field of particles belonging to halos within the
+        central :math:`1/2^3` high-resolution region of the simulation. Smoothing
+        must be applied separately.
 
         Parameters
         ----------
-        clumps : array of arrays
-            Array of clump structured arrays whose `x`, `y`, `z` keys will be
-            converted.
-
-        Returns
-        -------
-        None
-        """
-        # Check if clumps are probably already in cells
-        if any(clumps[0][0].dtype[p].char in numpy.typecodes["AllInteger"]
-               for p in ('x', 'y', 'z')):
-            raise ValueError("Positions appear to already be converted cells.")
-
-        # Get the new dtype that replaces float for int for positions
-        names = clumps[0][0].dtype.names  # Take the first one, doesn't matter
-        formats = [descr[1] for descr in clumps[0][0].dtype.descr]
-
-        for i in range(len(names)):
-            if names[i] in ('x', 'y', 'z'):
-                formats[i] = numpy.int32
-        dtype = numpy.dtype({"names": names, "formats": formats})
-
-        # Loop switch positions for cells IDs and change dtype
-        for n in range(clumps.size):
-            for p in ('x', 'y', 'z'):
-                clumps[n][0][p] = self.pos2cell(clumps[n][0][p])
-            clumps[n][0] = clumps[n][0].astype(dtype)
-
-    def make_bckg_delta(self, clumps, delta=None):
-        """
-        Calculate a NGP density field of clumps within the central
-        :math:`1/2^3` region of the simulation. Smoothing must be applied
-        separately.
-
-        Parameters
-        ----------
-        clumps : list of structured arrays
-            List of clump structured array, keys must include `x`, `y`, `z`
-            and `M`.
+        halo_archive : `NpzFile` object
+            Archive of halos' particles of the reference simulation, keys must
+            include `x`, `y`, `z` and `M`.
         delta : 3-dimensional array, optional
             Array to store the density field in. If `None` a new array is
             created.
+        verbose : bool, optional
+            Verbosity flag for loading the files.
 
         Returns
         -------
         delta : 3-dimensional array
         """
-        conc_clumps = concatenate_clumps(clumps)
-        cells = [self.pos2cell(conc_clumps[p]) for p in ('x', 'y', 'z')]
-        mass = conc_clumps['M']
-
-        del conc_clumps
-        collect()  # This is a large array so force memory clean
-
-        cellmin = self.inv_clength // 4         # The minimum cell ID
-        cellmax = 3 * self.inv_clength // 4     # The maximum cell ID
+        # We obtain the minimum/maximum cell IDs and number of cells along each dim.
+        cellmin = self.inv_clength // 4  # The minimum cell ID
+        cellmax = 3 * self.inv_clength // 4  # The maximum cell ID
         ncells = cellmax - cellmin
-        # Mask out particles outside the cubical high resolution region
-        mask = ((cellmin <= cells[0]) & (cells[0] < cellmax)
-                & (cellmin <= cells[1]) & (cells[1] < cellmax)
-                & (cellmin <= cells[2]) & (cells[2] < cellmax)
-                )
-        cells = [c[mask] for c in cells]
-        mass = mass[mask]
-
-        # Prepare the density field or check it is of the right shape
+        # We then pre-allocate the density field or check it is of the right shape
+        # if already given.
         if delta is None:
             delta = numpy.zeros((ncells,) * 3, dtype=numpy.float32)
         else:
-            assert ((delta.shape == (ncells,) * 3)
-                    & (delta.dtype == numpy.float32))
-        fill_delta(delta, *cells, *(cellmin,) * 3, mass)
+            assert (delta.shape == (ncells,) * 3) & (delta.dtype == numpy.float32)
+
+        # We now loop one-by-one over the halos fill the density field.
+        files = halo_archive.files
+        for file in tqdm(files) if verbose else files:
+            parts = halo_archive[file]
+            cells = [self.pos2cell(parts[p]) for p in ("x", "y", "z")]
+            mass = parts["M"]
+
+            # We mask out particles outside the cubical high-resolution region
+            mask = (
+                (cellmin <= cells[0])
+                & (cells[0] < cellmax)
+                & (cellmin <= cells[1])
+                & (cells[1] < cellmax)
+                & (cellmin <= cells[2])
+                & (cells[2] < cellmax)
+            )
+            cells = [c[mask] for c in cells]
+            mass = mass[mask]
+            fill_delta(delta, *cells, *(cellmin,) * 3, mass)
 
         return delta
 
-    def make_delta(self, clump, mins=None, maxs=None, subbox=False,
-                   smooth_kwargs=None):
+    def make_delta(self, clump, mins=None, maxs=None, subbox=False, smooth_kwargs=None):
         """
         Calculate a NGP density field of a halo on a cubic grid. Optionally can
         be smoothed with a Gaussian kernel.
@@ -453,7 +472,7 @@ class ParticleOverlap:
         -------
         delta : 3-dimensional array
         """
-        cells = [self.pos2cell(clump[p]) for p in ('x', 'y', 'z')]
+        cells = [self.pos2cell(clump[p]) for p in ("x", "y", "z")]
 
         # Check that minima and maxima are integers
         if not (mins is None and maxs is None):
@@ -464,26 +483,38 @@ class ParticleOverlap:
             # Minimum xcell, ycell and zcell of this clump
             if mins is None or maxs is None:
                 mins = numpy.asanyarray(
-                    [max(numpy.min(cell) - self.nshift, 0) for cell in cells])
+                    [max(numpy.min(cell) - self.nshift, 0) for cell in cells]
+                )
                 maxs = numpy.asanyarray(
-                    [min(numpy.max(cell) + self.nshift, self.inv_clength)
-                     for cell in cells])
+                    [
+                        min(numpy.max(cell) + self.nshift, self.inv_clength)
+                        for cell in cells
+                    ]
+                )
 
             ncells = numpy.max(maxs - mins) + 1  # To get the number of cells
         else:
-            mins = (0, 0, 0,)
+            mins = [0, 0, 0]
             ncells = self.inv_clength
 
         # Preallocate and fill the array
         delta = numpy.zeros((ncells,) * 3, dtype=numpy.float32)
-        fill_delta(delta, *cells, *mins, clump['M'])
+        fill_delta(delta, *cells, *mins, clump["M"])
 
         if smooth_kwargs is not None:
             gaussian_filter(delta, output=delta, **smooth_kwargs)
         return delta
 
-    def make_deltas(self, clump1, clump2, mins1=None, maxs1=None,
-                    mins2=None, maxs2=None, smooth_kwargs=None):
+    def make_deltas(
+        self,
+        clump1,
+        clump2,
+        mins1=None,
+        maxs1=None,
+        mins2=None,
+        maxs2=None,
+        smooth_kwargs=None,
+    ):
         """
         Calculate a NGP density fields of two halos on a grid that encloses
         them both. Optionally can be smoothed with a Gaussian kernel.
@@ -513,8 +544,8 @@ class ParticleOverlap:
             Indices where the lower mass clump has a non-zero density.
             Calculated only if no smoothing is applied, otherwise `None`.
         """
-        xc1, yc1, zc1 = (self.pos2cell(clump1[p]) for p in ('x', 'y', 'z'))
-        xc2, yc2, zc2 = (self.pos2cell(clump2[p]) for p in ('x', 'y', 'z'))
+        xc1, yc1, zc1 = (self.pos2cell(clump1[p]) for p in ("x", "y", "z"))
+        xc2, yc2, zc2 = (self.pos2cell(clump2[p]) for p in ("x", "y", "z"))
 
         if any(obj is None for obj in (mins1, maxs1, mins2, maxs2)):
             # Minimum cell number of the two halos along each dimension
@@ -529,32 +560,35 @@ class ParticleOverlap:
             ymax = max(numpy.max(yc1), numpy.max(yc2)) + self.nshift
             zmax = max(numpy.max(zc1), numpy.max(zc2)) + self.nshift
             # Make sure shifting does not go beyond boundaries
-            xmax, ymax, zmax = [min(px, self.inv_clength - 1)
-                                for px in (xmax, ymax, zmax)]
+            xmax, ymax, zmax = [
+                min(px, self.inv_clength - 1) for px in (xmax, ymax, zmax)
+            ]
         else:
             xmin, ymin, zmin = [min(mins1[i], mins2[i]) for i in range(3)]
             xmax, ymax, zmax = [max(maxs1[i], maxs2[i]) for i in range(3)]
 
-        cellmins = (xmin, ymin, zmin, )  # Cell minima
+        cellmins = (xmin, ymin, zmin)  # Cell minima
         ncells = max(xmax - xmin, ymax - ymin, zmax - zmin) + 1  # Num cells
 
         # Preallocate and fill the arrays
-        delta1 = numpy.zeros((ncells,)*3, dtype=numpy.float32)
-        delta2 = numpy.zeros((ncells,)*3, dtype=numpy.float32)
+        delta1 = numpy.zeros((ncells,) * 3, dtype=numpy.float32)
+        delta2 = numpy.zeros((ncells,) * 3, dtype=numpy.float32)
 
         # If no smoothing figure out the nonzero indices of the smaller clump
         if smooth_kwargs is None:
             if clump1.size > clump2.size:
-                fill_delta(delta1, xc1, yc1, zc1, *cellmins, clump1['M'])
-                nonzero = fill_delta_indxs(delta2, xc2, yc2, zc2, *cellmins,
-                                           clump2['M'])
+                fill_delta(delta1, xc1, yc1, zc1, *cellmins, clump1["M"])
+                nonzero = fill_delta_indxs(
+                    delta2, xc2, yc2, zc2, *cellmins, clump2["M"]
+                )
             else:
-                nonzero = fill_delta_indxs(delta1, xc1, yc1, zc1, *cellmins,
-                                           clump1['M'])
-                fill_delta(delta2, xc2, yc2, zc2, *cellmins, clump2['M'])
+                nonzero = fill_delta_indxs(
+                    delta1, xc1, yc1, zc1, *cellmins, clump1["M"]
+                )
+                fill_delta(delta2, xc2, yc2, zc2, *cellmins, clump2["M"])
         else:
-            fill_delta(delta1, xc1, yc1, zc1, *cellmins, clump1['M'])
-            fill_delta(delta2, xc2, yc2, zc2, *cellmins, clump2['M'])
+            fill_delta(delta1, xc1, yc1, zc1, *cellmins, clump1["M"])
+            fill_delta(delta2, xc2, yc2, zc2, *cellmins, clump2["M"])
             nonzero = None
 
         if smooth_kwargs is not None:
@@ -562,9 +596,19 @@ class ParticleOverlap:
             gaussian_filter(delta2, output=delta2, **smooth_kwargs)
         return delta1, delta2, cellmins, nonzero
 
-    def __call__(self, clump1, clump2, delta_bckg, mins1=None, maxs1=None,
-                 mins2=None, maxs2=None, mass1=None, mass2=None,
-                 smooth_kwargs=None):
+    def __call__(
+        self,
+        clump1,
+        clump2,
+        delta_bckg,
+        mins1=None,
+        maxs1=None,
+        mins2=None,
+        maxs2=None,
+        mass1=None,
+        mass2=None,
+        smooth_kwargs=None,
+    ):
         """
         Calculate overlap between `clump1` and `clump2`. See
         `calculate_overlap(...)` for further information. Be careful so that
@@ -603,16 +647,17 @@ class ParticleOverlap:
         overlap : float
         """
         delta1, delta2, cellmins, nonzero = self.make_deltas(
-            clump1, clump2, mins1, maxs1, mins2, maxs2,
-            smooth_kwargs=smooth_kwargs)
+            clump1, clump2, mins1, maxs1, mins2, maxs2, smooth_kwargs=smooth_kwargs
+        )
 
         if smooth_kwargs is not None:
             return calculate_overlap(delta1, delta2, cellmins, delta_bckg)
         # Calculate masses not given
-        mass1 = numpy.sum(clump1['M']) if mass1 is None else mass1
-        mass2 = numpy.sum(clump2['M']) if mass2 is None else mass2
-        return calculate_overlap_indxs(delta1, delta2, cellmins, delta_bckg,
-                                       nonzero, mass1, mass2)
+        mass1 = numpy.sum(clump1["M"]) if mass1 is None else mass1
+        mass2 = numpy.sum(clump2["M"]) if mass2 is None else mass2
+        return calculate_overlap_indxs(
+            delta1, delta2, cellmins, delta_bckg, nonzero, mass1, mass2
+        )
 
 
 ###############################################################################
@@ -682,14 +727,15 @@ def fill_delta_indxs(delta, xcell, ycell, zcell, xmin, ymin, zmin, weights):
     return cells[:count_nonzero, :]  # Cutoff unassigned places
 
 
-def get_clumplims(clumps, ncells, nshift=None):
+def get_halolims(halo, ncells, nshift=None):
     """
-    Get the lower and upper limit of clumps' positions or cell numbers.
+    Get the lower and upper limit of a halo's positions or cell numbers.
 
     Parameters
     ----------
-    clumps : array of arrays
-        Array of clump structured arrays.
+    halo : structured array
+        Structured array containing the particles of a given halo. Keys must
+        `x`, `y`, `z`.
     ncells : int
         Number of grid cells of the box along a single dimension.
     nshift : int, optional
@@ -697,23 +743,21 @@ def get_clumplims(clumps, ncells, nshift=None):
 
     Returns
     -------
-    mins, maxs : 2-dimensional arrays of shape `(n_samples, 3)`
+    mins, maxs : 1-dimensional arrays of shape `(3, )`
         Minimum and maximum along each axis.
     """
-    dtype = clumps[0][0]['x'].dtype  # dtype of the first clump's 'x'
-    # Check that for real positions we cannot apply nshift
+    # Check that in case of `nshift` we have integer positions.
+    dtype = halo["x"].dtype
     if nshift is not None and dtype.char not in numpy.typecodes["AllInteger"]:
         raise TypeError("`nshift` supported only positions are cells.")
     nshift = 0 if nshift is None else nshift  # To simplify code below
 
-    nclumps = clumps.size
-    mins = numpy.full((nclumps, 3), numpy.nan, dtype=dtype)
-    maxs = numpy.full((nclumps, 3), numpy.nan, dtype=dtype)
+    mins = numpy.full(3, numpy.nan, dtype=dtype)
+    maxs = numpy.full(3, numpy.nan, dtype=dtype)
 
-    for i, clump in enumerate(clumps):
-        for j, p in enumerate(['x', 'y', 'z']):
-            mins[i, j] = max(numpy.min(clump[0][p]) - nshift, 0)
-            maxs[i, j] = min(numpy.max(clump[0][p]) + nshift, ncells - 1)
+    for i, p in enumerate(["x", "y", "z"]):
+        mins[i] = max(numpy.min(halo[p]) - nshift, 0)
+        maxs[i] = min(numpy.max(halo[p]) + nshift, ncells - 1)
 
     return mins, maxs
 
@@ -742,10 +786,10 @@ def calculate_overlap(delta1, delta2, cellmins, delta_bckg):
     -------
     overlap : float
     """
-    totmass = 0.           # Total mass of clump 1 and clump 2
-    intersect = 0.         # Weighted intersecting mass
+    totmass = 0.0  # Total mass of clump 1 and clump 2
+    intersect = 0.0  # Weighted intersecting mass
     i0, j0, k0 = cellmins  # Unpack things
-    bckg_offset = 512      # Offset of the background density field
+    bckg_offset = 512  # Offset of the background density field
     bckg_size = 1024
     imax, jmax, kmax = delta1.shape
 
@@ -770,8 +814,9 @@ def calculate_overlap(delta1, delta2, cellmins, delta_bckg):
 
 
 @jit(nopython=True)
-def calculate_overlap_indxs(delta1, delta2, cellmins, delta_bckg, nonzero,
-                            mass1, mass2):
+def calculate_overlap_indxs(
+    delta1, delta2, cellmins, delta_bckg, nonzero, mass1, mass2
+):
     r"""
     Overlap between two clumps whose density fields are evaluated on the
     same grid and `nonzero1` enumerates the non-zero cells of `delta1.  This is
@@ -800,10 +845,10 @@ def calculate_overlap_indxs(delta1, delta2, cellmins, delta_bckg, nonzero,
     -------
     overlap : float
     """
-    intersect = 0.         # Weighted intersecting mass
+    intersect = 0.0  # Weighted intersecting mass
     i0, j0, k0 = cellmins  # Unpack cell minimas
-    bckg_offset = 512      # Offset of the background density field
-    bckg_size = 1024       # Size of the background density field array
+    bckg_offset = 512  # Offset of the background density field
+    bckg_size = 1024  # Size of the background density field array
 
     for n in range(nonzero.shape[0]):
         i, j, k = nonzero[n, :]
@@ -811,11 +856,11 @@ def calculate_overlap_indxs(delta1, delta2, cellmins, delta_bckg, nonzero,
         prod = 2 * m1 * m2
 
         if prod > 0:
-            ii = i0 + i - bckg_offset    # Indices of this cell in the
-            jj = j0 + j - bckg_offset    # background density field.
+            ii = i0 + i - bckg_offset  # Indices of this cell in the
+            jj = j0 + j - bckg_offset  # background density field.
             kk = k0 + k - bckg_offset
 
-            ishighres = 0 <= ii < bckg_size   # Is this cell is in the high
+            ishighres = 0 <= ii < bckg_size  # Is this cell is in the high
             ishighres &= 0 <= jj < bckg_size  # resolution region for which the
             ishighres &= 0 <= kk < bckg_size  # background field is calculated.
 
@@ -827,7 +872,7 @@ def calculate_overlap_indxs(delta1, delta2, cellmins, delta_bckg, nonzero,
 
 def dist_centmass(clump):
     """
-    Calculate the clump particles' distance from the centre of mass.
+    Calculate the clump (or halo) particles' distance from the centre of mass.
 
     Parameters
     ----------
@@ -842,12 +887,15 @@ def dist_centmass(clump):
         Center of mass coordinates.
     """
     # CM along each dimension
-    cmx, cmy, cmz = [numpy.average(clump[p], weights=clump['M'])
-                     for p in ('x', 'y', 'z')]
+    cmx, cmy, cmz = [
+        numpy.average(clump[p], weights=clump["M"]) for p in ("x", "y", "z")
+    ]
     # Particle distance from the CM
-    dist = numpy.sqrt(numpy.square(clump['x'] - cmx)
-                      + numpy.square(clump['y'] - cmy)
-                      + numpy.square(clump['z'] - cmz))
+    dist = numpy.sqrt(
+        numpy.square(clump["x"] - cmx)
+        + numpy.square(clump["y"] - cmy)
+        + numpy.square(clump["z"] - cmz)
+    )
 
     return dist, numpy.asarray([cmx, cmy, cmz])
 
@@ -874,8 +922,9 @@ def dist_percentile(dist, qs, distmax=0.075):
     return x
 
 
-def radius_neighbours(knn, X, radiusX, radiusKNN, nmult=1.,
-                      enforce_int32=False, verbose=True):
+def radius_neighbours(
+    knn, X, radiusX, radiusKNN, nmult=1.0, enforce_int32=False, verbose=True
+):
     """
     Find all neigbours of a trained KNN model whose center of mass separation
     is less than `nmult` times the sum of their respective radii.
@@ -904,8 +953,8 @@ def radius_neighbours(knn, X, radiusX, radiusKNN, nmult=1.,
     indxs : 1-dimensional array `(n_samples,)` of arrays
         Matches to `X` from `knn`.
     """
-    assert X.ndim == 2 and X.shape[1] == 3       # shape of X ok?
-    assert X.shape[0] == radiusX.size            # patchX matches X?
+    assert X.ndim == 2 and X.shape[1] == 3  # shape of X ok?
+    assert X.shape[0] == radiusX.size  # patchX matches X?
     assert radiusKNN.size == knn.n_samples_fit_  # patchknn matches the knn?
 
     nsamples = X.shape[0]
@@ -913,9 +962,9 @@ def radius_neighbours(knn, X, radiusX, radiusKNN, nmult=1.,
     patchknn_max = numpy.max(radiusKNN)  # Maximum for completeness
 
     for i in trange(nsamples) if verbose else range(nsamples):
-        dist, indx = knn.radius_neighbors(X[i, :].reshape(-1, 3),
-                                          radiusX[i] + patchknn_max,
-                                          sort_results=True)
+        dist, indx = knn.radius_neighbors(
+            X[i, :].reshape(-1, 3), radiusX[i] + patchknn_max, sort_results=True
+        )
         # Note that `dist` and `indx` are wrapped in 1-element arrays
         # so we take the first item where appropriate
         mask = (dist[0] / (radiusX[i] + radiusKNN[indx[0]])) < nmult
@@ -924,58 +973,3 @@ def radius_neighbours(knn, X, radiusX, radiusKNN, nmult=1.,
             indxs[i] = indxs[i].astype(numpy.int32)
 
     return numpy.asarray(indxs, dtype=object)
-
-
-###############################################################################
-#                             Sky mathing                                     #
-###############################################################################
-
-
-# def brute_spatial_separation(c1, c2, angular=False, N=None, verbose=False):
-#     """
-#     Calculate for each point in `c1` the `N` closest points in `c2`.
-
-#     Parameters
-#     ----------
-#     c1 : `astropy.coordinates.SkyCoord`
-#         Coordinates of the first set of points.
-#     c2 : `astropy.coordinates.SkyCoord`
-#         Coordinates of the second set of points.
-#     angular : bool, optional
-#         Whether to calculate angular separation or 3D separation. By default
-#         `False` and 3D separation is calculated.
-#     N : int, optional
-#         Number of closest points in `c2` to each object in `c1` to return.
-#     verbose : bool, optional
-#         Verbosity flag. By default `False`.
-
-#     Returns
-#     -------
-#     sep : 1-dimensional array
-#         Separation of each object in `c1` to `N` closest objects in `c2`. The
-#         array shape is `(c1.size, N)`. Separation is in units of `c1`.
-#     indxs : 1-dimensional array
-#         Indexes of the closest objects in `c2` for each object in `c1`. The
-#         array shape is `(c1.size, N)`.
-#     """
-#     if not (isinstance(c1, SkyCoord) and isinstance(c2, SkyCoord)):
-#         raise TypeError(
-# "`c1` & `c2` must be `astropy.coordinates.SkyCoord`.")
-#     N1 = c1.size
-#     N2 = c2.size if N is None else N
-
-#     # Pre-allocate arrays
-#     sep = numpy.full((N1, N2), numpy.nan)
-#     indxs = numpy.full((N1, N2), numpy.nan, dtype=int)
-#     iters = tqdm(range(N1)) if verbose else range(N1)
-#     for i in iters:
-#         if angular:
-#             dist = c1[i].separation(c2).value
-#         else:
-#             dist = c1[i].separation_3d(c2).value
-#         # Sort the distances
-#         sort = numpy.argsort(dist)[:N2]
-#         indxs[i, :] = sort
-#         sep[i, :] = dist[sort]
-
-#     return sep, indxs
