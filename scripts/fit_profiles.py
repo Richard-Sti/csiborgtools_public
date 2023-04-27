@@ -126,7 +126,7 @@ for i, nsim in enumerate(nsims):
         _out["r"] = r[mask]
         _out["M"] = obj["M"][mask]
 
-        out[str(clumps_cat["index"][i])] = _out
+        out[str(clumps_cat["index"][j])] = _out
 
     # Finished, so we save everything.
     fout = paths.radpos_path(nsnap, nsim)
