@@ -16,13 +16,18 @@
 Script to calculate the particle centre of mass and Lagrangian patch size in
 the initial snapshot. Optinally dumps the particle files, however this requires
 a lot of memory.
+
+TODO:
+    - stop saving the particle IDs. Unnecessary.
+    - Switch to h5py files. This way can save the positions in the particle
+    array only.
 """
 from argparse import ArgumentParser
 from datetime import datetime
 from distutils.util import strtobool
 from gc import collect
 from os import remove
-from os.path import join
+from os.path import isfile, join
 
 import numpy
 from mpi4py import MPI
@@ -129,6 +134,10 @@ for i, nsim in enumerate(paths.get_ics(tonew=True)):
         out = numpy.full(parent_ids.size, numpy.nan, dtype=dtype)
         for i, clid in enumerate(parent_ids):
             fpath = ftemp.format(nsim, clid, "fit")
+            # There is no file if the halo was skipped due to too few
+            # particles.
+            if not isfile(fpath):
+                continue
             with open(fpath, "rb") as f:
                 inp = numpy.load(f)
                 out["index"][i] = clid
@@ -151,8 +160,11 @@ for i, nsim in enumerate(paths.get_ics(tonew=True)):
             out = {}
             for clid in parent_ids:
                 fpath = ftemp.format(nsim, clid, "particles")
+                if not isfile(fpath):
+                    continue
                 with open(fpath, "rb") as f:
                     out.update({str(clid): numpy.load(f)})
+                remove(fpath)
 
             fout = paths.initmatch_path(nsim, "particles")
             print(f"{datetime.now()}: dumping particles to .. `{fout}`.",
