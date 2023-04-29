@@ -93,7 +93,7 @@ for i, nsim in enumerate(paths.get_ics(tonew=True)):
     # the end save these.
     cat = csiborgtools.read.ClumpsCatalogue(nsim, paths, load_fitted=False,
                                             rawdata=True)
-    parent_ids = cat["index"][cat.ismain][:500]
+    parent_ids = cat["index"][cat.ismain]
     jobs = csiborgtools.fits.split_jobs(parent_ids.size, nproc)[rank]
     for i in tqdm(jobs) if verbose else jobs:
         clid = parent_ids[i]
@@ -101,6 +101,9 @@ for i, nsim in enumerate(paths.get_ics(tonew=True)):
 
         mmain_mask = numpy.isin(clump_ids, mmain_indxs, assume_unique=True)
         mmain_particles = part0[mmain_mask]
+        # If the number of particles is too small, we skip this halo.
+        if mmain_particles.size < 100:
+            continue
 
         raddist, cmpos = csiborgtools.match.dist_centmass(mmain_particles)
         patchsize = csiborgtools.match.dist_percentile(raddist, [99],

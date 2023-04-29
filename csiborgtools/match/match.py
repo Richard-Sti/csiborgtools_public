@@ -115,9 +115,9 @@ class RealisationsMatcher:
 
         Parameters
         ----------
-        cat0 : :py:class:`csiborgtools.read.ClumpsCatalogue`
+        cat0 : :py:class:`csiborgtools.read.HaloCatalogue`
             Halo catalogue of the reference simulation.
-        catx : :py:class:`csiborgtools.read.ClumpsCatalogue`
+        catx : :py:class:`csiborgtools.read.HaloCatalogue`
             Halo catalogue of the cross simulation.
         halos0_archive : `NpzFile` object
             Archive of halos' particles of the reference simulation, keys must
@@ -198,10 +198,8 @@ class RealisationsMatcher:
                 except KeyError:
                     halox = halosx_archive[str(kf)]
                     minsx, maxsx = get_halolims(
-                        halox,
-                        ncells=self.overlapper.inv_clength,
-                        nshift=self.overlapper.nshift,
-                    )
+                        halox, ncells=self.overlapper.inv_clength,
+                        nshift=self.overlapper.nshift)
                     for p in ("x", "y", "z"):
                         halox[p] = self.overlapper.pos2cell(halox[p])
                     cross_halos[kf] = halox
@@ -768,9 +766,8 @@ def calculate_overlap(delta1, delta2, cellmins, delta_bckg):
 
 
 @jit(nopython=True)
-def calculate_overlap_indxs(
-    delta1, delta2, cellmins, delta_bckg, nonzero, mass1, mass2
-):
+def calculate_overlap_indxs(delta1, delta2, cellmins, delta_bckg, nonzero,
+                            mass1, mass2):
     r"""
     Overlap between two clumps whose density fields are evaluated on the
     same grid and `nonzero1` enumerates the non-zero cells of `delta1.  This is
@@ -841,15 +838,14 @@ def dist_centmass(clump):
         Center of mass coordinates.
     """
     # CM along each dimension
-    cmx, cmy, cmz = [
-        numpy.average(clump[p], weights=clump["M"]) for p in ("x", "y", "z")
-    ]
+    cmx, cmy, cmz = [numpy.average(clump[p], weights=clump["M"])
+                     for p in ("x", "y", "z")]
     # Particle distance from the CM
     dist = numpy.sqrt(
         numpy.square(clump["x"] - cmx)
         + numpy.square(clump["y"] - cmy)
         + numpy.square(clump["z"] - cmz)
-    )
+        )
 
     return dist, numpy.asarray([cmx, cmy, cmz])
 
@@ -876,9 +872,8 @@ def dist_percentile(dist, qs, distmax=0.075):
     return x
 
 
-def radius_neighbours(
-    knn, X, radiusX, radiusKNN, nmult=1.0, enforce_int32=False, verbose=True
-):
+def radius_neighbours(knn, X, radiusX, radiusKNN, nmult=1.0,
+                      enforce_int32=False, verbose=True):
     """
     Find all neigbours of a trained KNN model whose center of mass separation
     is less than `nmult` times the sum of their respective radii.
