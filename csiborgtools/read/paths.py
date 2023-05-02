@@ -132,40 +132,19 @@ class CSiBORGPaths:
         nsim : int
             IC realisation index.
         kind : str
-            Type of match.  Can be either `fit` or `particles`.
+            Type of match. Must be one of `["particles", "fit", "halomap"]`.
 
         Returns
         -------
         path : str
         """
-        assert kind in ["fit", "particles"]
+        assert kind in ["particles", "fit", "halomap"]
+        ftype = "npy" if kind == "fit" else "h5"
         fdir = join(self.postdir, "initmatch")
         if not isdir(fdir):
             mkdir(fdir)
             warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
-        return join(fdir, f"{kind}_{str(nsim).zfill(5)}.npy")
-
-    def split_path(self, nsnap, nsim):
-        """
-        Path to the `split` files from `pre_splithalos`.
-
-        Parameters
-        ----------
-        nsnap : int
-            Snapshot index.
-        nsim : int
-            IC realisation index.
-
-        Returns
-        -------
-        path : str
-        """
-        fdir = join(self.postdir, "split")
-        if not isdir(fdir):
-            mkdir(fdir)
-            warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
-        return join(
-            fdir, f"clumps_{str(nsim).zfill(5)}_{str(nsnap).zfill(5)}.npz")
+        return join(fdir, f"{kind}_{str(nsim).zfill(5)}.{ftype}")
 
     def get_ics(self, tonew):
         """
@@ -326,30 +305,37 @@ class CSiBORGPaths:
         fname = f"radpos_{str(nsim).zfill(5)}_{str(nsnap).zfill(5)}.npz"
         return join(fdir, fname)
 
-    def particle_h5py_path(self, nsim, with_vel):
+    def particle_h5py_path(self, nsim, kind=None, dtype="float32"):
         """
-        Path to the files containing all particles in a `.hdf5` file. Used for
-        the SPH calculation.
+        Path to the file containing all particles in a `.h5` file.
 
         Parameters
         ----------
         nsim : int
             IC realisation index.
-        with_vel : bool
-            Whether velocities are included.
+        kind : str
+            Type of output. Must be one of `[None, 'pos', 'clumpmap']`.
+        dtype : str
+            Data type. Must be one of `['float32', 'float64']`.
 
         Returns
         -------
         path : str
         """
-        fdir = join(self.postdir, "environment")
+        assert kind in [None, "pos", "clumpmap"]
+        assert dtype in ["float32", "float64"]
+        fdir = join(self.postdir, "particles")
         if not isdir(fdir):
             makedirs(fdir)
             warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
-        if with_vel:
+        if kind is None:
             fname = f"parts_{str(nsim).zfill(5)}.h5"
         else:
-            fname = f"parts_pos_{str(nsim).zfill(5)}.h5"
+            fname = f"parts_{kind}_{str(nsim).zfill(5)}.h5"
+
+        if dtype == "float64":
+            fname = fname.replace(".h5", "_f64.h5")
+
         return join(fdir, fname)
 
     def density_field_path(self, mas, nsim):
