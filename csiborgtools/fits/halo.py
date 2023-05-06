@@ -15,6 +15,7 @@
 """A clump object."""
 from abc import ABC
 
+from numba import jit
 import numpy
 
 
@@ -101,16 +102,21 @@ class BaseStructure(ABC):
         """
         return numpy.vstack([self[p] for p in ("vx", "vy", "vz")]).T
 
+    @property
     def r(self):
         """
-        Calculate the radial separation of the particles from the centre of the
-        object.
+        Radial separation of particles from the centre of the object.
 
         Returns
         -------
         r : 1-dimensional array of shape `(n_particles, )`.
         """
-        return numpy.linalg.norm(self.pos, axis=1)
+        return self._get_r(self.pos)
+
+    @staticmethod
+    @jit(nopython=True)
+    def _get_r(pos):
+        return (pos[:, 0]**2 + pos[:, 1]**2 + pos[:, 2]**2)**0.5
 
     def cmass(self, rmax, rmin):
         """
@@ -130,7 +136,7 @@ class BaseStructure(ABC):
         -------
         cm : 1-dimensional array of shape `(3, )`
         """
-        r = self.r()
+        r = self.r
         mask = (r >= rmin) & (r <= rmax)
         return numpy.average(self.pos[mask], axis=0, weights=self["M"][mask])
 
@@ -149,7 +155,7 @@ class BaseStructure(ABC):
         -------
         J : 1-dimensional array or shape `(3, )`
         """
-        r = self.r()
+        r = self.r
         mask = (r >= rmin) & (r <= rmax)
         pos = self.pos[mask] - self.cmass(rmax, rmin)
         # Velocitities in the object CM frame
@@ -172,17 +178,17 @@ class BaseStructure(ABC):
         -------
         enclosed_mass : float
         """
-        r = self.r()
+        r = self.r
         return numpy.sum(self["M"][(r >= rmin) & (r <= rmax)])
 
-    def lambda_bullock(self, radius, npart_min=10):
+    def lambda_bullock(self, radmax, npart_min=10):
         r"""
         Bullock spin, see Eq. 5 in [1], in a radius of `radius`, which should
         define to some overdensity radius.
 
         Parameters
         ----------
-        radius : float
+        radmax : float
             Radius in which to calculate the spin.
         npart_min : int
             Minimum number of enclosed particles for a radius to be
@@ -198,14 +204,13 @@ class BaseStructure(ABC):
         Bullock, J. S.;  Dekel, A.;  Kolatt, T. S.;  Kravtsov, A. V.;
         Klypin, A. A.;  Porciani, C.;  Primack, J. R.
         """
-        mask = self.r() <= radius
+        mask = self.r <= radmax
         if numpy.sum(mask) < npart_min:
             return numpy.nan
-        mass = self.enclosed_mass(radius)
-        V = numpy.sqrt(self.box.box_G * mass / radius)
-        out = numpy.linalg.norm(self.angular_momentum(radius))
-        out /= numpy.sqrt(2) * mass * V * radius
-        return out
+        mass = self.enclosed_mass(radmax)
+        circvel = numpy.sqrt(self.box.box_G * mass / radmax)
+        angmom_norm = numpy.linalg.norm(self.angular_momentum(radmax))
+        return angmom_norm / (numpy.sqrt(2) * mass * circvel * radmax)
 
     def spherical_overdensity_mass(self, delta_mult, npart_min=10,
                                    kind="crit"):
@@ -236,18 +241,18 @@ class BaseStructure(ABC):
         assert kind in ["crit", "matter"]
 
         # We first sort the particles in an increasing separation
-        rs = self.r()
+        rs = self.r
         order = numpy.argsort(rs)
         rs = rs[order]
+
         cmass = numpy.cumsum(self["M"][order])  # Cumulative mass
         # We calculate the enclosed volume and indices where it is above target
-        vol = 4 * numpy.pi / 3 * (rs**3 - rs[0] ** 3)
+        vol = 4 * numpy.pi / 3 * rs**3
 
         target_density = delta_mult * self.box.box_rhoc
         if kind == "matter":
             target_density *= self.box.cosmo.Om0
-        with numpy.errstate(divide="ignore"):
-            ks = numpy.where(cmass / vol > target_density)[0]
+        ks = numpy.where(cmass > target_density * vol)[0]
         if ks.size == 0:  # Never above the threshold?
             return numpy.nan, numpy.nan
         k = numpy.max(ks)
@@ -257,7 +262,7 @@ class BaseStructure(ABC):
 
     def __getitem__(self, key):
         keys = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'M']
-        if key not in self.keys:
+        if key not in keys:
             raise RuntimeError(f"Invalid key `{key}`!")
         return self.particles[:, keys.index(key)]
 
@@ -304,3 +309,31 @@ class Halo(BaseStructure):
         self.particles = particles
         self.info = info
         self.box = box
+
+
+###############################################################################
+#                       Other, supplementary functions                        #
+###############################################################################
+
+@jit(nopython=True)
+def dist_centmass(clump):
+    """
+    Calculate the clump (or halo) particles' distance from the centre of mass.
+
+    Parameters
+    ----------
+    clump : 2-dimensional array of shape (n_particles, 7)
+        Particle array. The first four columns must be `x`, `y`, `z` and `M`.
+
+    Returns
+    -------
+    dist : 1-dimensional array of shape `(n_particles, )`
+        Particle distance from the centre of mass.
+    cm : len-3 list
+        Center of mass coordinates.
+    """
+    mass = clump[:, 3]
+    x, y, z = clump[:, 0], clump[:, 1], clump[:, 2]
+    cmx, cmy, cmz = [numpy.average(xi, weights=mass) for xi in (x, y, z)]
+    dist = ((x - cmx)**2 + (y - cmy)**2 + (z - cmz)**2)**0.5
+    return dist, [cmx, cmy, cmz]

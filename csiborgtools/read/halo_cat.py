@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-"""CSiBORG halo catalogue."""
+"""CSiBORG halo and clumps catalogues."""
 from abc import ABC
 
 import numpy
@@ -177,7 +177,7 @@ class BaseCatalogue(ABC):
         knn : :py:class:`sklearn.neighbors.NearestNeighbors`
         """
         knn = NearestNeighbors()
-        return knn.fit(self.positions(in_initial))
+        return knn.fit(self.position(in_initial))
 
     def radius_neigbours(self, X, radius, in_initial):
         r"""
@@ -368,6 +368,8 @@ class HaloCatalogue(BaseCatalogue):
     minmass : len-2 tuple
         Minimum mass. The first element is the catalogue key and the second is
         the value.
+    with_lagpatch : bool, optional
+        Whether to only load halos with a resolved Lagrangian patch.
     load_fitted : bool, optional
         Whether to load fitted quantities.
     load_initial : bool, optional
@@ -378,22 +380,39 @@ class HaloCatalogue(BaseCatalogue):
     """
 
     def __init__(self, nsim, paths, maxdist=155.5 / 0.705, minmass=("M", 1e12),
-                 load_fitted=True, load_initial=False, rawdata=False):
+                 with_lagpatch=True, load_fitted=True, load_initial=True,
+                 rawdata=False):
         self.nsim = nsim
         self.paths = paths
         # Read in the mmain catalogue of summed substructure
         mmain = numpy.load(self.paths.mmain_path(self.nsnap, self.nsim))
         self._data = mmain["mmain"]
-
+        # We will also need the clumps catalogue
+        self._clumps_cat = ClumpsCatalogue(nsim, paths, rawdata=True,
+                                           load_fitted=False)
         if load_fitted:
             fits = numpy.load(paths.structfit_path(self.nsnap, nsim, "halos"))
             cols = [col for col in fits.dtype.names if col != "index"]
             X = [fits[col] for col in cols]
             self._data = add_columns(self._data, X, cols)
 
-        # TODO: load initial positions
+        if load_initial:
+            fits = numpy.load(paths.initmatch_path(nsim, "fit"))
+            X, cols = [], []
+            for col in fits.dtype.names:
+                if col == "index":
+                    continue
+                if col in ['x', 'y', 'z']:
+                    cols.append(col + "0")
+                else:
+                    cols.append(col)
+                X.append(fits[col])
+
+            self._data = add_columns(self._data, X, cols)
 
         if not rawdata:
+            if with_lagpatch:
+                self._data = self._data[numpy.isfinite(self['lagpatch'])]
             # Flip positions and convert from code units to cMpc. Convert M too
             flip_cols(self._data, "x", "z")
             for p in ("x", "y", "z"):
@@ -402,9 +421,24 @@ class HaloCatalogue(BaseCatalogue):
                      "r500c", "m200c", "m500c", "r200m", "m200m"]
             self._data = self.box.convert_from_boxunits(self._data, names)
 
+            if load_initial:
+                names = ["x0", "y0", "z0", "lagpatch"]
+                self._data = self.box.convert_from_boxunits(self._data, names)
+
             if maxdist is not None:
                 dist = numpy.sqrt(self._data["x"]**2 + self._data["y"]**2
                                   + self._data["z"]**2)
                 self._data = self._data[dist < maxdist]
             if minmass is not None:
                 self._data = self._data[self._data[minmass[0]] > minmass[1]]
+
+    @property
+    def clumps_cat(self):
+        """
+        The raw clumps catalogue.
+
+        Returns
+        -------
+        clumps_cat : :py:class:`csiborgtools.read.ClumpsCatalogue`
+        """
+        return self._clumps_cat

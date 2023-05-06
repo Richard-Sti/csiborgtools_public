@@ -260,7 +260,7 @@ class CSiBORGPaths:
         fname = f"{kind}_out_{str(nsim).zfill(5)}_{str(nsnap).zfill(5)}.npy"
         return join(fdir, fname)
 
-    def overlap_path(self, nsim0, nsimx):
+    def overlap_path(self, nsim0, nsimx, smoothed):
         """
         Path to the overlap files between two simulations.
 
@@ -270,6 +270,8 @@ class CSiBORGPaths:
             IC realisation index of the first simulation.
         nsimx : int
             IC realisation index of the second simulation.
+        smoothed : bool
+            Whether the overlap is smoothed or not.
 
         Returns
         -------
@@ -280,6 +282,8 @@ class CSiBORGPaths:
             mkdir(fdir)
             warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
         fname = f"overlap_{str(nsim0).zfill(5)}_{str(nsimx).zfill(5)}.npz"
+        if smoothed:
+            fname = fname.replace("overlap", "overlap_smoothed")
         return join(fdir, fname)
 
     def radpos_path(self, nsnap, nsim):
@@ -305,37 +309,24 @@ class CSiBORGPaths:
         fname = f"radpos_{str(nsim).zfill(5)}_{str(nsnap).zfill(5)}.npz"
         return join(fdir, fname)
 
-    def particle_h5py_path(self, nsim, kind=None, dtype="float32"):
+    def particles_path(self, nsim):
         """
-        Path to the file containing all particles in a `.h5` file.
+        Path to the files containing all particles.
 
         Parameters
         ----------
         nsim : int
             IC realisation index.
-        kind : str
-            Type of output. Must be one of `[None, 'pos', 'clumpmap']`.
-        dtype : str
-            Data type. Must be one of `['float32', 'float64']`.
 
         Returns
         -------
         path : str
         """
-        assert kind in [None, "pos", "clumpmap"]
-        assert dtype in ["float32", "float64"]
         fdir = join(self.postdir, "particles")
         if not isdir(fdir):
             makedirs(fdir)
             warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
-        if kind is None:
-            fname = f"parts_{str(nsim).zfill(5)}.h5"
-        else:
-            fname = f"parts_{kind}_{str(nsim).zfill(5)}.h5"
-
-        if dtype == "float64":
-            fname = fname.replace(".h5", "_f64.h5")
-
+        fname = f"parts_{str(nsim).zfill(5)}.h5"
         return join(fdir, fname)
 
     def density_field_path(self, mas, nsim):

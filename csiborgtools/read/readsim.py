@@ -215,7 +215,10 @@ class ParticleReader:
 
         Returns
         -------
-        out : array
+        out : structured array or 2-dimensional array
+            Particle information.
+        pids : 1-dimensional array
+            Particle IDs.
         """
         # Open the particle files
         nparts, partfiles = self.open_particle(nsnap, nsim, verbose=verbose)
@@ -233,6 +236,8 @@ class ParticleReader:
         # Check there are no strange parameters
         if isinstance(pars_extract, str):
             pars_extract = [pars_extract]
+        if "ID" in pars_extract:
+            pars_extract.remove("ID")
         for p in pars_extract:
             if p not in fnames:
                 raise ValueError(f"Undefined parameter `{p}`.")
@@ -250,6 +255,7 @@ class ParticleReader:
             par2arrpos = {par: i for i, par in enumerate(pars_extract)}
             out = numpy.full((npart_tot, len(pars_extract)), numpy.nan,
                              dtype=numpy.float32)
+        pids = numpy.full(npart_tot, numpy.nan, dtype=numpy.int32)
 
         start_ind = self.nparts_to_start_ind(nparts)
         iters = tqdm(range(ncpu)) if verbose else range(ncpu)
@@ -257,19 +263,21 @@ class ParticleReader:
             i = start_ind[cpu]
             j = nparts[cpu]
             for (fname, fdtype) in zip(fnames, fdtypes):
-                if fname in pars_extract:
-                    single_part = self.read_sp(fdtype, partfiles[cpu])
+                single_part = self.read_sp(fdtype, partfiles[cpu])
+                if fname == "ID":
+                    pids[i:i + j] = single_part
+                elif fname in pars_extract:
                     if return_structured:
                         out[fname][i:i + j] = single_part
                     else:
                         out[i:i + j, par2arrpos[fname]] = single_part
                 else:
-                    dum[i:i + j] = self.read_sp(fdtype, partfiles[cpu])
+                    dum[i:i + j] = single_part
         # Close the fortran files
         for partfile in partfiles:
             partfile.close()
 
-        return out
+        return out, pids
 
     def open_unbinding(self, nsnap, nsim, cpu):
         """
@@ -389,11 +397,16 @@ class ParticleReader:
 class MmainReader:
     """
     Object to generate the summed substructure catalogue.
+
+    Parameters
+    ----------
+    paths : :py:class:`csiborgtools.read.CSiBORGPaths`
+        Paths objects.
     """
     _paths = None
 
     def __init__(self, paths):
-        assert isinstance(paths, CSiBORGPaths)  # REMOVE
+        assert isinstance(paths, CSiBORGPaths)
         self._paths = paths
 
     @property
@@ -444,7 +457,7 @@ class MmainReader:
     def make_mmain(self, nsim, verbose=False):
         """
         Make the summed substructure catalogue for a final snapshot. Includes
-        the position of the paren, the summed mass and the fraction of mass in
+        the position of the parent, the summed mass and the fraction of mass in
         substructure.
 
         Parameters
@@ -472,10 +485,10 @@ class MmainReader:
         nmain = numpy.sum(mask_main)
         # Preallocate already the output array
         out = cols_to_structured(
-            nmain, [("ID", numpy.int32), ("x", numpy.float32),
+            nmain, [("index", numpy.int32), ("x", numpy.float32),
                     ("y", numpy.float32), ("z", numpy.float32),
                     ("M", numpy.float32), ("subfrac", numpy.float32)])
-        out["ID"] = clumparr["index"][mask_main]
+        out["index"] = clumparr["index"][mask_main]
         # Because for these index == parent
         for p in ('x', 'y', 'z'):
             out[p] = clumparr[p][mask_main]
@@ -483,7 +496,7 @@ class MmainReader:
         for i in range(nmain):
             # Should include the main halo itself, i.e. its own ultimate parent
             out["M"][i] = numpy.sum(
-                clumparr["mass_cl"][ultimate_parent == out["ID"][i]])
+                clumparr["mass_cl"][ultimate_parent == out["index"][i]])
 
         out["subfrac"] = 1 - clumparr["mass_cl"][mask_main] / out["M"]
         return out, ultimate_parent
@@ -549,3 +562,69 @@ def halfwidth_select(hw, particles):
     for p in ('x', 'y', 'z'):
         particles[p] = (particles[p] - 0.5 + hw) / (2 * hw)
     return particles
+
+
+def load_clump_particles(clid, particles, clump_map, clid2map):
+    """
+    Load a clump's particles from a particle array. If it is not there, i.e
+    clump has no associated particles, return `None`.
+
+    Parameters
+    ----------
+    clid : int
+        Clump ID.
+    particles : 2-dimensional array
+        Array of particles.
+    clump_map : 2-dimensional array
+        Array containing start and end indices in the particle array
+        corresponding to each clump.
+    clid2map : dict
+        Dictionary mapping clump IDs to `clump_map` array positions.
+
+    Returns
+    -------
+    clump_particles : 2-dimensional array
+        Particle array of this clump.
+    """
+    try:
+        k0, kf = clump_map[clid2map[clid], 1:]
+        return particles[k0:kf + 1, :]
+    except KeyError:
+        return None
+
+
+def load_parent_particles(hid, particles, clump_map, clid2map, clumps_cat):
+    """
+    Load a parent halo's particles from a particle array. If it is not there,
+    return `None`.
+
+    Parameters
+    ----------
+    hid : int
+        Halo ID.
+    particles : 2-dimensional array
+        Array of particles.
+    clump_map : 2-dimensional array
+        Array containing start and end indices in the particle array
+        corresponding to each clump.
+    clid2map : dict
+        Dictionary mapping clump IDs to `clump_map` array positions.
+    clumps_cat : :py:class:`csiborgtools.read.ClumpsCatalogue`
+        Clumps catalogue.
+
+    Returns
+    -------
+    halo : 2-dimensional array
+        Particle array of this halo.
+    """
+    clids = clumps_cat["index"][clumps_cat["parent"] == hid]
+    # We first load the particles of each clump belonging to this parent
+    # and then concatenate them for further analysis.
+    clumps = []
+    for clid in clids:
+        parts = load_clump_particles(clid, particles, clump_map, clid2map)
+        if parts is not None:
+            clumps.append(parts)
+    if len(clumps) == 0:
+        return None
+    return numpy.concatenate(clumps)
