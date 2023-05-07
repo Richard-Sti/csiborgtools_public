@@ -21,7 +21,6 @@ from os.path import isfile
 import numpy
 from tqdm import tqdm
 
-
 ###############################################################################
 #                         Overlap of two simulations                          #
 ###############################################################################
@@ -600,6 +599,11 @@ class NPairsOverlap:
 
     def __len__(self):
         return len(self.pairs)
+
+
+###############################################################################
+#                       Various support functions.                            #
+###############################################################################
 
 
 def binned_resample_mean(x, y, prob, bins, nresample=50, seed=42):

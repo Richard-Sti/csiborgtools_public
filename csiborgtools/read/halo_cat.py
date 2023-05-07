@@ -22,7 +22,7 @@ from .box_units import BoxUnits
 from .paths import CSiBORGPaths
 from .readsim import ParticleReader
 from .utils import (add_columns, cartesian_to_radec, flip_cols,
-                    radec_to_cartesian)
+                    radec_to_cartesian, real2redshift)
 
 
 class BaseCatalogue(ABC):
@@ -152,6 +152,33 @@ class BaseCatalogue(ABC):
         """
         return numpy.vstack([self["v{}".format(p)] for p in ("x", "y", "z")]).T
 
+    def redshift_space_position(self, cartesian=True):
+        r"""
+        Redshift space position components. If Cartesian, then in
+        :math:`\mathrm{cMpc}`. If spherical, then radius is in
+        :math:`\mathrm{cMpc}`, RA in :math:`[0, 360)` degrees and DEC in
+        :math:`[-90, 90]` degrees. Note that the position is defined as the
+        minimum of the gravitationl potential.
+
+        Parameters
+        ----------
+        cartesian : bool, optional
+            Whether to return the Cartesian or spherical position components.
+            By default Cartesian.
+
+        Returns
+        -------
+        pos : 2-dimensional array of shape `(nobjects, 3)`
+        """
+        pos = self.position(cartesian=True)
+        vel = self.velocity()
+        origin = [0., 0., 0.]
+        rsp = real2redshift(pos, vel, origin, self.box, in_box_units=False,
+                            make_copy=False)
+        if not cartesian:
+            rsp = cartesian_to_radec(rsp)
+        return rsp
+
     def angmomentum(self):
         """
         Cartesian angular momentum components of halos in the box coordinate
@@ -207,7 +234,7 @@ class BaseCatalogue(ABC):
         knn = self.knn(in_initial)
         return knn.radius_neighbors(X, radius, sort_results=True)
 
-    def angular_neighbours(self, X, ang_radius, rad_tolerance=None):
+    def angular_neighbours(self, X, ang_radius, in_rsp, rad_tolerance=None):
         r"""
         Find nearest neighbours within `ang_radius` of query points `X`.
         Optionally applies radial tolerance, which is expected to be in
@@ -219,6 +246,8 @@ class BaseCatalogue(ABC):
             Query positions. If 2-dimensional, then RA and DEC in degrees.
             If 3-dimensional, then radial distance in :math:`\mathrm{cMpc}`,
             RA and DEC in degrees.
+        in_rsp : bool
+            Whether to use redshift space positions of haloes.
         ang_radius : float
             Angular radius in degrees.
         rad_tolerance : float, optional
@@ -234,7 +263,10 @@ class BaseCatalogue(ABC):
         assert X.ndim == 2
         # We first get positions of haloes in this catalogue, store their
         # radial distance and normalise them to unit vectors.
-        pos = self.position(in_initial=False, cartesian=True)
+        if in_rsp:
+            pos = self.redshift_space_position(cartesian=True)
+        else:
+            pos = self.position(in_initial=False, cartesian=True)
         raddist = numpy.linalg.norm(pos, axis=1)
         pos /= raddist.reshape(-1, 1)
         # We convert RAdec query positions to unit vectors. If no radial
@@ -329,7 +361,8 @@ class ClumpsCatalogue(BaseCatalogue):
             for p in ("x", "y", "z"):
                 self._data[p] -= 0.5
             names = ["x", "y", "z", "mass_cl", "totpartmass", "rho0", "r200c",
-                     "r500c", "m200c", "m500c", "r200m", "m200m"]
+                     "r500c", "m200c", "m500c", "r200m", "m200m",
+                     "vx", "vy", "vz"]
             self._data = self.box.convert_from_boxunits(self._data, names)
             if maxdist is not None:
                 dist = numpy.sqrt(self._data["x"]**2 + self._data["y"]**2
@@ -420,7 +453,8 @@ class HaloCatalogue(BaseCatalogue):
             for p in ("x", "y", "z"):
                 self._data[p] -= 0.5
             names = ["x", "y", "z", "M", "totpartmass", "rho0", "r200c",
-                     "r500c", "m200c", "m500c", "r200m", "m200m"]
+                     "r500c", "m200c", "m500c", "r200m", "m200m",
+                     "vx", "vy", "vz"]
             self._data = self.box.convert_from_boxunits(self._data, names)
 
             if load_initial:
