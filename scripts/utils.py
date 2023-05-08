@@ -26,7 +26,7 @@ except ModuleNotFoundError:
 
 
 Nsplits = 200
-dumpdir = "/mnt/extraspace/rstiskalek/csiborg/"
+dumpdir = "/mnt/extraspace/rstiskalek/CSiBORG/"
 
 
 # Some chosen clusters
