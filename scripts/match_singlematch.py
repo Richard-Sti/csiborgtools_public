@@ -97,7 +97,8 @@ def pair_match(nsim0, nsimx, sigma, smoothen, verbose):
     # We calculate the smoothed overlap for the pairs whose NGP overlap is > 0.
     smoothed_overlap = matcher.smoothed_cross(cat0, catx, parts0, partsx,
                                               clumpmap0, clumpmapx, delta_bckg,
-                                              match_indxs, smooth_kwargs)
+                                              match_indxs, smooth_kwargs,
+                                              verbose=verbose)
 
     fout = paths.overlap_path(nsim0, nsimx, smoothed=True)
     numpy.savez(fout, smoothed_overlap=smoothed_overlap, sigma=sigma)
