@@ -45,7 +45,7 @@ nproc = comm.Get_size()
 if nproc > 1:
     raise NotImplementedError("MPI is not implemented implemented yet.")
 
-paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
+paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
 cols_collect = [("r", numpy.float32), ("M", numpy.float32)]
 if args.ics is None or args.ics == -1:
     nsims = paths.get_ics()
@@ -59,7 +59,7 @@ for i, nsim in enumerate(nsims):
         now = datetime.now()
         print(f"{now}: calculating {i}th simulation `{nsim}`.", flush=True)
     nsnap = max(paths.get_snapshots(nsim))
-    box = csiborgtools.read.BoxUnits(nsnap, nsim, paths)
+    box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
 
     f = csiborgtools.read.read_h5(paths.particles_path(nsim))
     particles = f["particles"]

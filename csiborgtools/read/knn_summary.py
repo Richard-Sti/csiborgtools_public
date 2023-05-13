@@ -24,7 +24,7 @@ class kNNCDFReader:
 
     Parameters
     ----------
-    paths : py:class`csiborgtools.read.CSiBORGPaths`
+    paths : py:class`csiborgtools.read.Paths`
     """
     _paths = None
 
@@ -38,13 +38,12 @@ class kNNCDFReader:
 
         Parameters
         ----------
-        paths : py:class`csiborgtools.read.CSiBORGPaths`
+        paths : py:class`csiborgtools.read.Paths`
         """
         return self._paths
 
     @paths.setter
     def paths(self, paths):
-        # assert isinstance(paths, CSiBORGPaths)  # REMOVE
         self._paths = paths
 
     def read(self, run, kind, rmin=None, rmax=None, to_clip=True):

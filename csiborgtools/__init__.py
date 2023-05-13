@@ -14,7 +14,8 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 from csiborgtools import clustering, field, fits, match, read  # noqa
 
-# Arguments to csiborgtools.read.CSiBORGPaths.
+# Arguments to csiborgtools.read.Paths.
 paths_glamdring = {"srcdir": "/mnt/extraspace/hdesmond/",
                    "postdir": "/mnt/extraspace/rstiskalek/CSiBORG/",
+                   "quijote_dir": "/mnt/extraspace/rstiskalek/Quijote",
                    }

@@ -18,9 +18,9 @@ snapshot ordering, which is sorted by the clump IDs.
 """
 from argparse import ArgumentParser
 from datetime import datetime
+from gc import collect
 
 import h5py
-from gc import collect
 import numpy
 from mpi4py import MPI
 
@@ -44,7 +44,7 @@ parser = ArgumentParser()
 parser.add_argument("--ics", type=int, nargs="+", default=None,
                     help="IC realisations. If `-1` processes all simulations.")
 args = parser.parse_args()
-paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
+paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
 partreader = csiborgtools.read.ParticleReader(paths)
 # NOTE: ID has to be the last column.
 pars_extract = ["x", "y", "z", "M", "ID"]

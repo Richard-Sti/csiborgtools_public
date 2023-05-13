@@ -42,7 +42,7 @@ parser.add_argument("--kind", type=str, choices=["halos", "clumps"])
 parser.add_argument("--ics", type=int, nargs="+", default=None,
                     help="IC realisations. If `-1` processes all simulations.")
 args = parser.parse_args()
-paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
+paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
 partreader = csiborgtools.read.ParticleReader(paths)
 nfwpost = csiborgtools.fits.NFWPosterior()
 
@@ -105,7 +105,7 @@ for nsim in [ics[i] for i in jobs]:
     print(f"{datetime.now()}: rank {rank} calculating simulation `{nsim}`.",
           flush=True)
     nsnap = max(paths.get_snapshots(nsim))
-    box = csiborgtools.read.BoxUnits(nsnap, nsim, paths)
+    box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
 
     # Particle archive
     f = csiborgtools.read.read_h5(paths.particles_path(nsim))

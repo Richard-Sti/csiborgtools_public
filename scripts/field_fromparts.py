@@ -46,7 +46,7 @@ parser.add_argument("--grid", type=int, help="Grid resolution.")
 parser.add_argument("--in_rsp", type=lambda x: bool(strtobool(x)),
                     help="Calculate the density field in redshift space?")
 args = parser.parse_args()
-paths = csiborgtools.read.CSiBORGPaths(**csiborgtools.paths_glamdring)
+paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
 mpart = 1.1641532e-10  # Particle mass in CSiBORG simulations.
 
 if args.ics is None or args.ics[0] == -1:
@@ -61,7 +61,7 @@ for i in csiborgtools.fits.split_jobs(len(ics), nproc)[rank]:
           flush=True)
 
     nsnap = max(paths.get_snapshots(nsim))
-    box = csiborgtools.read.BoxUnits(nsnap, nsim, paths)
+    box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
     parts = csiborgtools.read.read_h5(paths.particles_path(nsim))["particles"]
 
     if args.kind == "density":

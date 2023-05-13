@@ -16,7 +16,7 @@
 import joblib
 import numpy
 
-from .paths import CSiBORGPaths
+from .paths import Paths
 
 
 class TPCFReader:
@@ -25,7 +25,7 @@ class TPCFReader:
 
     Parameters
     ----------
-    paths : py:class`csiborgtools.read.CSiBORGPaths`
+    paths : py:class`csiborgtools.read.Paths`
     """
     _paths = None
 
@@ -39,13 +39,13 @@ class TPCFReader:
 
         Parameters
         ----------
-        paths : py:class`csiborgtools.read.CSiBORGPaths`
+        paths : py:class`csiborgtools.read.Paths`
         """
         return self._paths
 
     @paths.setter
     def paths(self, paths):
-        assert isinstance(paths, CSiBORGPaths)
+        assert isinstance(paths, Paths)
         self._paths = paths
 
     def read(self, run):
