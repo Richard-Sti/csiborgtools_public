@@ -94,6 +94,7 @@ def plot_summed_overlap(nsim0):
         plt.colorbar(label="Counts in bins")
         plt.xlabel(r"$M_{\rm tot} / M_\odot$")
         plt.ylabel(r"$\langle \mathcal{O}_{a}^{\mathcal{A} \mathcal{B}} \rangle_{\mathcal{B}}$")  # noqa
+        plt.ylim(0., 1.)
 
         plt.tight_layout()
         for ext in ["png", "pdf"]:
@@ -110,6 +111,7 @@ def plot_summed_overlap(nsim0):
         plt.colorbar(label="Counts in bins")
         plt.xlabel(r"$M_{\rm tot} / M_\odot$")
         plt.ylabel(r"$\delta \left( \mathcal{O}_{a}^{\mathcal{A} \mathcal{B}} \right)_{\mathcal{B}}$")  # noqa
+        plt.ylim(0., 1.)
         plt.tight_layout()
 
         for ext in ["png", "pdf"]:
