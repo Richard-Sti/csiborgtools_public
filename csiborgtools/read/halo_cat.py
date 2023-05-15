@@ -18,9 +18,14 @@ Simulation catalogues:
     - Quijote: halo catalogue.
 """
 from abc import ABC, abstractproperty
+from copy import deepcopy
+from functools import lru_cache
+from itertools import product
+from math import floor
 from os.path import join
 
 import numpy
+
 from readfof import FoF_catalog
 from sklearn.neighbors import NearestNeighbors
 
@@ -97,6 +102,16 @@ class BaseCatalogue(ABC):
         if self._data is None:
             raise RuntimeError("Catalogue data not loaded!")
         return self._data
+
+    def apply_bounds(self, bounds):
+        for key, (xmin, xmax) in bounds.items():
+            xmin = -numpy.inf if xmin is None else xmin
+            xmax = numpy.inf if xmax is None else xmax
+            if key == "dist":
+                x = self.radial_distance(in_initial=False)
+            else:
+                x = self[key]
+            self._data = self._data[(x > xmin) & (x <= xmax)]
 
     @abstractproperty
     def box(self):
@@ -175,6 +190,22 @@ class BaseCatalogue(ABC):
             rsp = cartesian_to_radec(rsp)
         return rsp
 
+    def radial_distance(self, in_initial=False):
+        r"""
+        Distance of haloes from the origin.
+
+        Parameters
+        ----------
+        in_initial : bool, optional
+            Whether to calculate in the initial snapshot.
+
+        Returns
+        -------
+        radial_distance : 1-dimensional array of shape `(nobjects,)`
+        """
+        pos = self.position(in_initial=in_initial, cartesian=True)
+        return numpy.linalg.norm(pos, axis=1)
+
     def angmomentum(self):
         """
         Cartesian angular momentum components of halos in the box coordinate
@@ -186,9 +217,10 @@ class BaseCatalogue(ABC):
         """
         return numpy.vstack([self["L{}".format(p)] for p in ("x", "y", "z")]).T
 
+    @lru_cache(maxsize=2)
     def knn(self, in_initial):
         """
-        kNN object fitted on all catalogue objects.
+        kNN object fitted on all catalogue objects. Caches the kNN object.
 
         Parameters
         ----------
@@ -202,19 +234,29 @@ class BaseCatalogue(ABC):
         knn = NearestNeighbors()
         return knn.fit(self.position(in_initial=in_initial))
 
-    def radius_neigbours(self, X, radius, in_initial):
+    def nearest_neighbours(self, X, radius, in_initial, knearest=False,
+                           return_mass=False, masss_key=None):
         r"""
-        Sorted nearest neigbours within `radius` of `X` in the initial
-        or final snapshot.
+        Sorted nearest neigbours within `radius` of `X` in the initial or final
+        snapshot. However, if `knearest` is `True` then the `radius` is assumed
+        to be the integer number of nearest neighbours to return.
 
         Parameters
         ----------
         X : 2-dimensional array of shape `(n_queries, 3)`
             Cartesian query position components in :math:`\mathrm{cMpc}`.
-        radius : float
-            Limiting neighbour distance.
+        radius : float or int
+            Limiting neighbour distance. If `knearest` is `True` then this is
+            the number of nearest neighbours to return.
         in_initial : bool
             Whether to define the kNN on the initial or final snapshot.
+        knearest : bool, optional
+            Whether `radius` is the number of nearest neighbours to return.
+        return_mass : bool, optional
+            Whether to return the masses of the nearest neighbours.
+        masss_key : str, optional
+            Key of the mass column in the catalogue. Must be provided if
+            `return_mass` is `True`.
 
         Returns
         -------
@@ -227,8 +269,30 @@ class BaseCatalogue(ABC):
         """
         if not (X.ndim == 2 and X.shape[1] == 3):
             raise TypeError("`X` must be an array of shape `(n_samples, 3)`.")
+        if knearest:
+            assert isinstance(radius, int)
+        if return_mass:
+            assert masss_key is not None
         knn = self.knn(in_initial)
-        return knn.radius_neighbors(X, radius, sort_results=True)
+
+        if knearest:
+            dist, indxs = knn.kneighbors(X, radius)
+        else:
+            dist, indxs = knn.radius_neighbors(X, radius, sort_results=True)
+
+        if not return_mass:
+            return dist, indxs
+
+        if knearest:
+            mass = numpy.copy(dist)
+            for i in range(dist.shape[0]):
+                mass[i, :] = self[masss_key][indxs[i]]
+        else:
+            mass = deepcopy(dist)
+            for i in range(dist.size):
+                mass[i] = self[masss_key][indxs[i]]
+
+        return dist, indxs, mass
 
     def angular_neighbours(self, X, ang_radius, in_rsp, rad_tolerance=None):
         r"""
@@ -354,13 +418,11 @@ class ClumpsCatalogue(BaseCSiBORG):
         IC realisation index.
     paths : py:class`csiborgtools.read.Paths`
         Paths object.
-    maxdist : float, optional
-        The maximum comoving distance of a halo. By default
-        :math:`155.5 / 0.705 ~ \mathrm{Mpc}` with assumed :math:`h = 0.705`,
-        which corresponds to the high-resolution region.
-    minmass : len-2 tuple, optional
-        Minimum mass. The first element is the catalogue key and the second is
-        the value.
+    bounds : dict
+        Parameter bounds to apply to the catalogue. The keys are the parameter
+        names and the items are a len-2 tuple of (min, max) values. In case of
+        no minimum or maximum, use `None`. For radial distance from the origin
+        use `dist`.
     load_fitted : bool, optional
         Whether to load fitted quantities.
     rawdata : bool, optional
@@ -368,8 +430,8 @@ class ClumpsCatalogue(BaseCSiBORG):
         transformations.
     """
 
-    def __init__(self, nsim, paths, maxdist=155.5 / 0.705,
-                 minmass=("mass_cl", 1e12), load_fitted=True, rawdata=False):
+    def __init__(self, nsim, paths, bounds={"dist": (0, 155.5 / 0.705)},
+                 load_fitted=True, rawdata=False):
         self.nsim = nsim
         self.paths = paths
         # Read in the clumps from the final snapshot
@@ -396,12 +458,8 @@ class ClumpsCatalogue(BaseCSiBORG):
                      "r500c", "m200c", "m500c", "r200m", "m200m",
                      "vx", "vy", "vz"]
             self._data = self.box.convert_from_box(self._data, names)
-            if maxdist is not None:
-                dist = numpy.sqrt(self._data["x"]**2 + self._data["y"]**2
-                                  + self._data["z"]**2)
-                self._data = self._data[dist < maxdist]
-            if minmass is not None:
-                self._data = self._data[self._data[minmass[0]] > minmass[1]]
+            if bounds is not None:
+                self.apply_bounds(bounds)
 
     @property
     def ismain(self):
@@ -431,13 +489,11 @@ class HaloCatalogue(BaseCSiBORG):
         IC realisation index.
     paths : py:class`csiborgtools.read.Paths`
         Paths object.
-    maxdist : float, optional
-        The maximum comoving distance of a halo. By default
-        :math:`155.5 / 0.705 ~ \mathrm{Mpc}` with assumed :math:`h = 0.705`,
-        which corresponds to the high-resolution region.
-    minmass : len-2 tuple
-        Minimum mass. The first element is the catalogue key and the second is
-        the value.
+    bounds : dict
+        Parameter bounds to apply to the catalogue. The keys are the parameter
+        names and the items are a len-2 tuple of (min, max) values. In case of
+        no minimum or maximum, use `None`. For radial distance from the origin
+        use `dist`.
     with_lagpatch : bool, optional
         Whether to only load halos with a resolved Lagrangian patch.
     load_fitted : bool, optional
@@ -450,7 +506,7 @@ class HaloCatalogue(BaseCSiBORG):
     """
     _clumps_cat = None
 
-    def __init__(self, nsim, paths, maxdist=155.5 / 0.705, minmass=("M", 1e12),
+    def __init__(self, nsim, paths, bounds={"dist": (0, 155.5 / 0.705)},
                  with_lagpatch=True, load_fitted=True, load_initial=True,
                  load_clumps_cat=False, rawdata=False):
         self.nsim = nsim
@@ -498,12 +554,8 @@ class HaloCatalogue(BaseCSiBORG):
                 names = ["x0", "y0", "z0", "lagpatch"]
                 self._data = self.box.convert_from_box(self._data, names)
 
-            if maxdist is not None:
-                dist = numpy.sqrt(self._data["x"]**2 + self._data["y"]**2
-                                  + self._data["z"]**2)
-                self._data = self._data[dist < maxdist]
-            if minmass is not None:
-                self._data = self._data[self._data[minmass[0]] > minmass[1]]
+            if bounds is not None:
+                self.apply_bounds(bounds)
 
     @property
     def clumps_cat(self):
@@ -538,16 +590,13 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         Snapshot index.
     origin : len-3 tuple, optional
         Where to place the origin of the box. By default the centre of the box.
-        In units of :math:`cMpc`.
-    maxdist : float, optional
-        The maximum comoving distance of a halo in the new reference frame, in
-        units of :math:`cMpc`.
-    minmass : len-2 tuple
-        Minimum mass. The first element is the catalogue key and the second is
-        the value.
-    rawdata : bool, optional
-        Whether to return the raw data. In this case applies no cuts and
-        transformations.
+        In units of :math:`cMpc`. Optionally can be an integer between 0 and 8,
+        inclusive to correspond to CSiBORG boxes.
+    bounds : dict
+        Parameter bounds to apply to the catalogue. The keys are the parameter
+        names and the items are a len-2 tuple of (min, max) values. In case of
+        no minimum or maximum, use `None`. For radial distance from the origin
+        use `dist`.
     **kwargs : dict
         Keyword arguments for backward compatibility.
     """
@@ -555,8 +604,7 @@ class QuijoteHaloCatalogue(BaseCatalogue):
 
     def __init__(self, nsim, paths, nsnap,
                  origin=[500 / 0.6711, 500 / 0.6711, 500 / 0.6711],
-                 maxdist=None, minmass=("group_mass", 1e12), rawdata=False,
-                 **kwargs):
+                 bounds=None, **kwargs):
         self.paths = paths
         self.nsnap = nsnap
         fpath = join(self.paths.quijote_dir, "halos", str(nsim))
@@ -569,9 +617,12 @@ class QuijoteHaloCatalogue(BaseCatalogue):
                 ("group_mass", numpy.float32), ("npart", numpy.int32)]
         data = cols_to_structured(fof.GroupLen.size, cols)
 
+        if isinstance(origin, int):
+            origin = fiducial_observers(1000 / 0.6711, 155.5 / 0.6711)[origin]
+
         pos = fof.GroupPos / 1e3 / self.box.h
         for i in range(3):
-            pos -= origin[i]
+            pos[:, i] -= origin[i]
         vel = fof.GroupVel * (1 + self.redshift)
         for i, p in enumerate(["x", "y", "z"]):
             data[p] = pos[:, i]
@@ -579,14 +630,9 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         data["group_mass"] = fof.GroupMass * 1e10 / self.box.h
         data["npart"] = fof.GroupLen
 
-        if not rawdata:
-            if maxdist is not None:
-                pos = numpy.vstack([data["x"], data["y"], data["z"]]).T
-                data = data[numpy.linalg.norm(pos, axis=1) < maxdist]
-            if minmass is not None:
-                data = data[data[minmass[0]] > minmass[1]]
-
         self._data = data
+        if bounds is not None:
+            self.apply_bounds(bounds)
 
     @property
     def nsnap(self):
@@ -626,3 +672,35 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         box : instance of :py:class:`csiborgtools.units.BaseBox`
         """
         return QuijoteBox(self.nsnap)
+
+
+###############################################################################
+#                     Utility functions for halo catalogues                   #
+###############################################################################
+
+
+def fiducial_observers(boxwidth, radius):
+    """
+    Positions of fiducial observers in a box, such that that the box is
+    subdivided among them into spherical regions.
+
+    Parameters
+    ----------
+    boxwidth : float
+        Box width.
+    radius : float
+        Radius of the spherical regions.
+
+    Returns
+    -------
+    origins : list of len-3 lists
+        Positions of the observers.
+    """
+    nobs = floor(boxwidth / (2 * radius))  # Number of observers per dimension
+
+    origins = list(product([1, 3, 5], repeat=nobs))
+    for i in range(len(origins)):
+        origins[i] = list(origins[i])
+        for j in range(nobs):
+            origins[i][j] *= radius
+    return origins

@@ -88,6 +88,13 @@ class Paths:
         self._check_directory(path)
         self._quijote_dir = path
 
+    @staticmethod
+    def get_quijote_ics():
+        """
+        Quijote IC realisation IDs.
+        """
+        return numpy.arange(100, dtype=int)
+
     @property
     def postdir(self):
         """
@@ -376,40 +383,52 @@ class Paths:
         fname = f"{kind}_{MAS}_{str(nsim).zfill(5)}_grid{grid}.npy"
         return join(fdir, fname)
 
-    def knnauto_path(self, run, nsim=None):
+    def knnauto_path(self, simname, run, nsim=None, nobs=None):
         """
         Path to the `knn` auto-correlation files. If `nsim` is not specified
         returns a list of files for this run for all available simulations.
 
         Parameters
         ----------
+        simname : str
+            Simulation name. Must be either `csiborg` or `quijote`.
         run : str
             Type of run.
         nsim : int, optional
             IC realisation index.
+        nobs : int, optional
+            Fiducial observer index in Quijote simulations.
 
         Returns
         -------
         path : str
         """
+        assert simname in ["csiborg", "quijote"]
         fdir = join(self.postdir, "knn", "auto")
         if not isdir(fdir):
             makedirs(fdir)
             warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
         if nsim is not None:
-            return join(fdir, f"knncdf_{str(nsim).zfill(5)}_{run}.p")
+            if simname == "csiborg":
+                nsim = str(nsim).zfill(5)
+            else:
+                assert nobs is not None
+                nsim = f"{str(nobs).zfill(2)}{str(nsim).zfill(3)}"
+            return join(fdir, f"{simname}_knncdf_{nsim}_{run}.p")
 
-        files = glob(join(fdir, "knncdf*"))
+        files = glob(join(fdir, f"{simname}_knncdf*"))
         run = "__" + run
         return [f for f in files if run in f]
 
-    def knncross_path(self, run, nsims=None):
+    def knncross_path(self, simname, run, nsims=None):
         """
         Path to the `knn` cross-correlation files. If `nsims` is not specified
         returns a list of files for this run for all available simulations.
 
         Parameters
         ----------
+        simname : str
+            Simulation name. Must be either `csiborg` or `quijote`.
         run : str
             Type of run.
         nsims : len-2 tuple of int, optional
@@ -427,19 +446,21 @@ class Paths:
             assert isinstance(nsims, (list, tuple)) and len(nsims) == 2
             nsim0 = str(nsims[0]).zfill(5)
             nsimx = str(nsims[1]).zfill(5)
-            return join(fdir, f"knncdf_{nsim0}_{nsimx}__{run}.p")
+            return join(fdir, f"{simname}_knncdf_{nsim0}_{nsimx}__{run}.p")
 
-        files = glob(join(fdir, "knncdf*"))
+        files = glob(join(fdir, f"{simname}_knncdf*"))
         run = "__" + run
         return [f for f in files if run in f]
 
-    def tpcfauto_path(self, run, nsim=None):
+    def tpcfauto_path(self, simname, run, nsim=None):
         """
         Path to the `tpcf` auto-correlation files. If `nsim` is not specified
         returns a list of files for this run for all available simulations.
 
         Parameters
         ----------
+        simname : str
+            Simulation name. Must be either `csiborg` or `quijote`.
         run : str
             Type of run.
         nsim : int, optional
@@ -454,8 +475,8 @@ class Paths:
             makedirs(fdir)
             warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
         if nsim is not None:
-            return join(fdir, f"tpcf{str(nsim).zfill(5)}_{run}.p")
+            return join(fdir, f"{simname}_tpcf{str(nsim).zfill(5)}_{run}.p")
 
-        files = glob(join(fdir, "tpcf*"))
+        files = glob(join(fdir, f"{simname}_tpcf*"))
         run = "__" + run
         return [f for f in files if run in f]
