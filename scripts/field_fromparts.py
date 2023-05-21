@@ -50,7 +50,7 @@ paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
 mpart = 1.1641532e-10  # Particle mass in CSiBORG simulations.
 
 if args.ics is None or args.ics[0] == -1:
-    ics = paths.get_ics()
+    ics = paths.get_ics("csiborg")
 else:
     ics = args.ics
 
@@ -62,7 +62,7 @@ for i in csiborgtools.fits.split_jobs(len(ics), nproc)[rank]:
 
     nsnap = max(paths.get_snapshots(nsim))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
-    parts = csiborgtools.read.read_h5(paths.particles_path(nsim))["particles"]
+    parts = csiborgtools.read.read_h5(paths.particles(nsim))["particles"]
 
     if args.kind == "density":
         gen = csiborgtools.field.DensityField(box, args.MAS)
@@ -71,6 +71,6 @@ for i in csiborgtools.fits.split_jobs(len(ics), nproc)[rank]:
         gen = csiborgtools.field.VelocityField(box, args.MAS)
         field = gen(parts, args.grid, mpart, verbose=verbose)
 
-    fout = paths.field_path(args.kind, args.MAS, args.grid, nsim, args.in_rsp)
+    fout = paths.field(args.kind, args.MAS, args.grid, nsim, args.in_rsp)
     print(f"{datetime.now()}: rank {rank} saving output to `{fout}`.")
     numpy.save(fout, field)

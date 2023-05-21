@@ -16,6 +16,7 @@
 MPI script to calculate the matter cross power spectrum between CSiBORG
 IC realisations. Units are Mpc/h.
 """
+raise NotImplementedError("This script is currently not working.")
 from argparse import ArgumentParser
 from datetime import datetime
 from gc import collect
@@ -51,7 +52,7 @@ MAS = "CIC"  # mass asignment scheme
 paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
 box = csiborgtools.read.CSiBORGBox(paths)
 reader = csiborgtools.read.ParticleReader(paths)
-ics = paths.get_ics()
+ics = paths.get_ics("csiborg")
 nsims = len(ics)
 
 # File paths

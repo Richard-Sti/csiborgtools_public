@@ -16,11 +16,13 @@
 A script to calculate the KNN-CDF for a set of CSiBORG halo catalogues.
 
 TODO:
+    - [ ] Add support for new catalogue readers. Currently will not work.
     - [ ] Update catalogue readers.
     - [ ] Update paths.
     - [ ] Update to cross-correlate different mass populations from different
     simulations.
 """
+raise NotImplementedError("This script is currently not working.")
 from argparse import ArgumentParser
 from datetime import datetime
 from itertools import combinations
@@ -58,7 +60,7 @@ with open("../scripts/knn_cross.yml", "r") as file:
 
 Rmax = 155 / 0.705  # Mpc (h = 0.705) high resolution region radius
 paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-ics = paths.get_ics()
+ics = paths.get_ics("csiborg")
 knncdf = csiborgtools.clustering.kNN_1DCDF()
 
 ###############################################################################
@@ -109,7 +111,7 @@ def do_cross(run, ics):
     )
 
     corr = knncdf.joint_to_corr(cdf0, cdf1, joint_cdf)
-    fout = paths.knncross_path(args.simname, run, ics)
+    fout = paths.knncross(args.simname, run, ics)
     joblib.dump({"rs": rs, "corr": corr}, fout)
 
 

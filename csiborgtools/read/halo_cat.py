@@ -439,11 +439,11 @@ class ClumpsCatalogue(BaseCSiBORG):
         cols = ["index", "parent", "x", "y", "z", "mass_cl"]
         self._data = partreader.read_clumps(self.nsnap, self.nsim, cols=cols)
         # Overwrite the parent with the ultimate parent
-        mmain = numpy.load(self.paths.mmain_path(self.nsnap, self.nsim))
+        mmain = numpy.load(self.paths.mmain(self.nsnap, self.nsim))
         self._data["parent"] = mmain["ultimate_parent"]
 
         if load_fitted:
-            fits = numpy.load(paths.structfit_path(self.nsnap, nsim, "clumps"))
+            fits = numpy.load(paths.structfit(self.nsnap, nsim, "clumps"))
             cols = [col for col in fits.dtype.names if col != "index"]
             X = [fits[col] for col in cols]
             self._data = add_columns(self._data, X, cols)
@@ -512,20 +512,20 @@ class HaloCatalogue(BaseCSiBORG):
         self.nsim = nsim
         self.paths = paths
         # Read in the mmain catalogue of summed substructure
-        mmain = numpy.load(self.paths.mmain_path(self.nsnap, self.nsim))
+        mmain = numpy.load(self.paths.mmain(self.nsnap, self.nsim))
         self._data = mmain["mmain"]
         # We will also need the clumps catalogue
         if load_clumps_cat:
             self._clumps_cat = ClumpsCatalogue(nsim, paths, rawdata=True,
                                                load_fitted=False)
         if load_fitted:
-            fits = numpy.load(paths.structfit_path(self.nsnap, nsim, "halos"))
+            fits = numpy.load(paths.structfit(self.nsnap, nsim, "halos"))
             cols = [col for col in fits.dtype.names if col != "index"]
             X = [fits[col] for col in cols]
             self._data = add_columns(self._data, X, cols)
 
         if load_initial:
-            fits = numpy.load(paths.initmatch_path(nsim, "fit"))
+            fits = numpy.load(paths.initmatch(nsim, "fit"))
             X, cols = [], []
             for col in fits.dtype.names:
                 if col == "index":
@@ -590,8 +590,7 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         Snapshot index.
     origin : len-3 tuple, optional
         Where to place the origin of the box. By default the centre of the box.
-        In units of :math:`cMpc`. Optionally can be an integer between 0 and 8,
-        inclusive to correspond to CSiBORG boxes.
+        In units of :math:`cMpc`.
     bounds : dict
         Parameter bounds to apply to the catalogue. The keys are the parameter
         names and the items are a len-2 tuple of (min, max) values. In case of
@@ -601,12 +600,16 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         Keyword arguments for backward compatibility.
     """
     _nsnap = None
+    _origin = None
 
     def __init__(self, nsim, paths, nsnap,
                  origin=[500 / 0.6711, 500 / 0.6711, 500 / 0.6711],
                  bounds=None, **kwargs):
         self.paths = paths
         self.nsnap = nsnap
+        self.origin = origin
+        self._boxwidth = 1000 / 0.6711
+
         fpath = join(self.paths.quijote_dir, "halos", str(nsim))
         fof = FoF_catalog(fpath, self.nsnap, long_ids=False, swap=False,
                           SFR=False, read_IDs=False)
@@ -614,21 +617,18 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         cols = [("x", numpy.float32), ("y", numpy.float32),
                 ("z", numpy.float32), ("vx", numpy.float32),
                 ("vy", numpy.float32), ("vz", numpy.float32),
-                ("group_mass", numpy.float32), ("npart", numpy.int32)]
+                ("group_mass", numpy.float32), ("npart", numpy.int32),
+                ("index", numpy.int32)]
         data = cols_to_structured(fof.GroupLen.size, cols)
 
-        if isinstance(origin, int):
-            origin = fiducial_observers(1000 / 0.6711, 155.5 / 0.6711)[origin]
-
         pos = fof.GroupPos / 1e3 / self.box.h
-        for i in range(3):
-            pos[:, i] -= origin[i]
         vel = fof.GroupVel * (1 + self.redshift)
         for i, p in enumerate(["x", "y", "z"]):
-            data[p] = pos[:, i]
+            data[p] = pos[:, i] - self.origin[i]
             data["v" + p] = vel[:, i]
         data["group_mass"] = fof.GroupMass * 1e10 / self.box.h
         data["npart"] = fof.GroupLen
+        data["index"] = numpy.arange(data.size, dtype=numpy.int32)
 
         self._data = data
         if bounds is not None:
@@ -673,6 +673,53 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         """
         return QuijoteBox(self.nsnap)
 
+    @property
+    def origin(self):
+        """
+        Origin of the box with respect to the initial box units.
+
+        Returns
+        -------
+        origin : len-3 tuple
+        """
+        if self._origin is None:
+            raise ValueError("`origin` is not set.")
+        return self._origin
+
+    @origin.setter
+    def origin(self, origin):
+        if isinstance(origin, (list, tuple)):
+            origin = numpy.asanyarray(origin)
+        assert origin.ndim == 1 and origin.size == 3
+        self._origin = origin
+
+    def pick_fiducial_observer(self, n, rmax):
+        r"""
+        Return a copy of itself, storing only halos within `rmax` of the new
+        fiducial observer.
+
+        Parameters
+        ----------
+        n : int
+            Fiducial observer index.
+        rmax : float
+            Maximum distance from the fiducial observer in :math:`cMpc`.
+
+        Returns
+        -------
+        cat : instance of csiborgtools.read.QuijoteHaloCatalogue
+        """
+        new_origin = fiducial_observers(self.box.boxsize, rmax)[n]
+        # We make a copy of the catalogue to avoid modifying the original.
+        # Then, we shift coordinates back to the original box frame and then to
+        # the new origin.
+        cat = deepcopy(self)
+        for i, p in enumerate(('x', 'y', 'z')):
+            cat._data[p] += self.origin[i]
+            cat._data[p] -= new_origin[i]
+
+        cat.apply_bounds({"dist": (0, rmax)})
+        return cat
 
 ###############################################################################
 #                     Utility functions for halo catalogues                   #
