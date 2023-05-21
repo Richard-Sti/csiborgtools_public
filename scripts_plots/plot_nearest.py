@@ -16,7 +16,6 @@
 from argparse import ArgumentParser
 
 import matplotlib.pyplot as plt
-import numpy
 import scienceplots  # noqa
 from cache_to_disk import cache_to_disk, delete_disk_caches_for_function
 
@@ -86,6 +85,5 @@ if __name__ == "__main__":
         for func in cached_funcs:
             print(f"Cleaning cache for function {func}.")
             delete_disk_caches_for_function(func)
-
 
     plot_cdf(kwargs)
