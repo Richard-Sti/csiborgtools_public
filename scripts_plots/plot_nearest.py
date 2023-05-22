@@ -65,8 +65,8 @@ def plot_cdf(run, kwargs):
             plt.plot(x, y_csiborg[i], c="C1", label=label2)
         plt.xlim(0, 75)
         plt.ylim(0, 1)
-        plt.xlabel(r"$r_{\rm neighbour}~[\mathrm{Mpc}]$")
-        plt.ylabel(r"$\mathrm{CDF}(r_{1\mathrm{N}})$")
+        plt.xlabel(r"$r_{1\mathrm{NN}}~[\mathrm{Mpc}]$")
+        plt.ylabel(r"$\mathrm{CDF}(r_{1\mathrm{NN}})$")
         plt.legend()
 
         plt.tight_layout()
@@ -93,7 +93,7 @@ def plot_significance_hist(run, nsim, kwargs):
         plt.figure()
         plt.hist(x, bins="auto")
 
-        plt.xlabel(r"$r_{1\mathrm{N}}$ significance $\mathrm{[\sigma]}$")
+        plt.xlabel(r"$r_{1\mathrm{NN}}$ significance $\mathrm{[\sigma]}$")
         plt.ylabel(r"Counts")
         plt.tight_layout()
         for ext in ["png"]:
