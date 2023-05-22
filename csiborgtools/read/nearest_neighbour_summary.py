@@ -19,6 +19,9 @@ the final snapshot.
 from math import floor
 
 import numpy
+from scipy.interpolate import interp1d
+from scipy.stats import kstest
+from scipy.special import erfinv
 from numba import jit
 from tqdm import tqdm
 
@@ -234,6 +237,58 @@ class NearestNeighbourReader:
         # We then build up a CDF for each radial bin.
         out = numpy.cumsum(out, axis=1, out=out)
         out /= out[:, -1].reshape(-1, 1)
+        return out
+
+    def calc_significance(self, simname, run, nsim, cdf, nobs=None):
+        """
+        Calculate the significance of the nearest neighbour distribution of a
+        reference halo relative to an unconstrained simulation.
+
+        Parameters
+        ----------
+        simname : str
+            Simulation name. Must be either `csiborg` or `quijote`.
+        run : str
+            Run name.
+        nsim : int
+            Simulation index.
+        cdf : 2-dimensional array of shape `(nbins_radial, nbins_neighbour)`
+            CDF of the nearest neighbour distribution in an unconstrained
+            suite of simiulations.
+        nobs : int, optional
+            Fiducial Quijote observer index.
+
+        Returns
+        -------
+        sigma : 1-dimensional array of shape `(nhalos,)`
+            Significance of the nearest neighbour distribution of each halo.
+        """
+        assert simname in ["csiborg", "quijote"]
+        data = self.read_single(simname, run, nsim, nobs)
+
+        rdist = data["rdist"]
+        ndist = data["ndist"]
+        rbin_edges = self.radial_bin_edges
+
+        # Create an interpolation function for each radial bin.
+        xbin = self.bin_centres("neighbour")
+        kwargs = {"bounds_error": False,
+                  "fill_value": numpy.nan,
+                  "assume_sorted": True}
+        N = self.nbins_radial
+        cdf_interp = [interp1d(xbin, cdf[i, :], **kwargs) for i in range(N)]
+
+        # We loop over each halo and find its radial bin. Then calculate the
+        # p-value under null hypothesis and convert it to a sigma value.
+        out = numpy.full(rdist.size, numpy.nan, dtype=numpy.float64)
+        for i, radial_cell in enumerate(numpy.digitize(rdist, rbin_edges) - 1):
+
+            # The null hypothesis is that the distances in Quijote are larger
+            # or equal to CSiBORG.
+            ks = kstest(ndist[i, :], cdf_interp[radial_cell], N=10000,
+                        alternative="greater")
+            # We convert the p-value to a sigma value.
+            out[i] = - numpy.sqrt(2) * erfinv(ks.pvalue - 1)
         return out
 
 
