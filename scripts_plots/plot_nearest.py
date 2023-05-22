@@ -14,8 +14,10 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 from argparse import ArgumentParser
+from os.path import join
 
 import matplotlib.pyplot as plt
+import numpy
 import scienceplots  # noqa
 from cache_to_disk import cache_to_disk, delete_disk_caches_for_function
 
@@ -31,19 +33,23 @@ except ModuleNotFoundError:
 
 @cache_to_disk(7)
 def read_cdf(simname, run, kwargs):
+    """Read the CDFs. Caches them to disk"""
     paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
     reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
     return reader.build_cdf(simname, run, verbose=True)
 
 
-def plot_cdf(kwargs):
+def plot_cdf(run, kwargs):
+    """
+    Plot the CDF of the nearest neighbour distance for Quijote and CSiBORG.
+    """
     print("Plotting the CDFs.", flush=True)
     paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
     reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
     x = reader.bin_centres("neighbour")
 
-    y_quijote = read_cdf("quijote", "mass003", kwargs)
-    y_csiborg = read_cdf("csiborg", "mass003", kwargs)
+    y_quijote = read_cdf("quijote", run, kwargs)
+    y_csiborg = read_cdf("csiborg", run, kwargs)
     ncdf = y_quijote.shape[0]
 
     with plt.style.context(utils.mplstyle):
@@ -60,12 +66,40 @@ def plot_cdf(kwargs):
         plt.xlim(0, 75)
         plt.ylim(0, 1)
         plt.xlabel(r"$r_{\rm neighbour}~[\mathrm{Mpc}]$")
-        plt.ylabel(r"$\mathrm{CDF}(r_{\rm neighbour})$")
+        plt.ylabel(r"$\mathrm{CDF}(r_{1\mathrm{N}})$")
         plt.legend()
 
         plt.tight_layout()
-        plt.savefig("../plots/nearest_neighbour_cdf.png", dpi=450,
-                    bbox_inches="tight")
+        for ext in ["png"]:
+            fout = join(utils.fout, f"1nn_cdf_{run}.{ext}")
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
+def plot_significance_hist(run, nsim, kwargs):
+    """
+    Plot the histogram of the significance of the 1NN distance for CSiBORG.
+    """
+    paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
+    reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+
+    cdf = read_cdf("quijote", run, kwargs)
+
+    x = reader.calc_significance("csiborg", run, nsim, cdf)
+    x = x[numpy.isfinite(x)]
+
+    with plt.style.context(utils.mplstyle):
+        plt.figure()
+        plt.hist(x, bins="auto")
+
+        plt.xlabel(r"$r_{1\mathrm{N}}$ significance $\mathrm{[\sigma]}$")
+        plt.ylabel(r"Counts")
+        plt.tight_layout()
+        for ext in ["png"]:
+            fout = join(utils.fout, f"sigma_{run}_{str(nsim).zfill(5)}.{ext}")
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
         plt.close()
 
 
@@ -86,4 +120,7 @@ if __name__ == "__main__":
             print(f"Cleaning cache for function {func}.")
             delete_disk_caches_for_function(func)
 
-    plot_cdf(kwargs)
+    # paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
+    # reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+
+    plot_significance_hist("mass003", 7444, kwargs)
