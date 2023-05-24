@@ -32,25 +32,43 @@ except ModuleNotFoundError:
 
 
 @cache_to_disk(7)
-def read_cdf(simname, run, kwargs):
-    """Read the CDFs. Caches them to disk"""
+def read_dist(simname, run, kind, kwargs):
     paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
     reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
-    return reader.build_cdf(simname, run, verbose=True)
+    return reader.build_dist(simname, run, kind, verbose=True)
 
 
-def plot_cdf(run, kwargs):
+@cache_to_disk(7)
+def make_kl(simname, run, nsim, nobs, kwargs):
+    paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
+    reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+
+    pdf = read_dist("quijote", run, "pdf", kwargs)
+    return reader.kl_divergence(simname, run, nsim, pdf, nobs=nobs)
+
+
+@cache_to_disk(7)
+def make_ks(simname, run, nsim, nobs, kwargs):
+    paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
+    reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+
+    cdf = read_dist("quijote", run, "cdf", kwargs)
+    return reader.ks_significance(simname, run, nsim, cdf, nobs=nobs)
+
+
+def plot_dist(run, kind, kwargs):
     """
-    Plot the CDF of the nearest neighbour distance for Quijote and CSiBORG.
+    Plot the PDF/CDF of the nearest neighbour distance for Quijote and CSiBORG.
     """
-    print("Plotting the CDFs.", flush=True)
+    assert kind in ["pdf", "cdf"]
+    print(f"Plotting the {kind}.", flush=True)
     paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
     reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
     x = reader.bin_centres("neighbour")
 
-    y_quijote = read_cdf("quijote", run, kwargs)
-    y_csiborg = read_cdf("csiborg", run, kwargs)
-    ncdf = y_quijote.shape[0]
+    y_quijote = read_dist("quijote", run, kind, kwargs)
+    y_csiborg = read_dist("csiborg", run, kind, kwargs)
+    ncdf = y_csiborg.shape[0]
 
     with plt.style.context(utils.mplstyle):
         plt.figure()
@@ -64,40 +82,83 @@ def plot_cdf(run, kwargs):
             plt.plot(x, y_quijote[i], c="C0", label=label1)
             plt.plot(x, y_csiborg[i], c="C1", label=label2)
         plt.xlim(0, 75)
-        plt.ylim(0, 1)
         plt.xlabel(r"$r_{1\mathrm{NN}}~[\mathrm{Mpc}]$")
-        plt.ylabel(r"$\mathrm{CDF}(r_{1\mathrm{NN}})$")
+        if kind == "pdf":
+            plt.ylabel(r"$p(r_{1\mathrm{NN}})$")
+        else:
+            plt.ylabel(r"$\mathrm{CDF}(r_{1\mathrm{NN}})$")
+            plt.ylim(0, 1)
         plt.legend()
-
         plt.tight_layout()
         for ext in ["png"]:
-            fout = join(utils.fout, f"1nn_cdf_{run}.{ext}")
+            fout = join(utils.fout, f"1nn_{kind}_{run}.{ext}")
             print(f"Saving to `{fout}`.")
             plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
         plt.close()
 
 
-def plot_significance_hist(run, nsim, kwargs):
-    """
-    Plot the histogram of the significance of the 1NN distance for CSiBORG.
-    """
+def plot_significance_hist(simname, run, nsim, nobs, kind, kwargs):
+    """Plot a histogram of the significance of the 1NN distance."""
+    assert kind in ["kl", "ks"]
     paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
-    reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
-
-    cdf = read_cdf("quijote", run, kwargs)
-
-    x = reader.calc_significance("csiborg", run, nsim, cdf)
+    if kind == "kl":
+        x = make_kl(simname, run, nsim, nobs, kwargs)
+    else:
+        x = make_ks(simname, run, nsim, nobs, kwargs)
+        x = numpy.log10(x)
     x = x[numpy.isfinite(x)]
 
     with plt.style.context(utils.mplstyle):
         plt.figure()
         plt.hist(x, bins="auto")
 
-        plt.xlabel(r"$r_{1\mathrm{NN}}$ significance $\mathrm{[\sigma]}$")
+        if kind == "ks":
+            plt.xlabel(r"$\log p$-value of $r_{1\mathrm{NN}}$ distribution")
+        else:
+            plt.xlabel(r"$D_{\mathrm{KL}}$ of $r_{1\mathrm{NN}}$ distribution")
         plt.ylabel(r"Counts")
         plt.tight_layout()
+
         for ext in ["png"]:
-            fout = join(utils.fout, f"sigma_{run}_{str(nsim).zfill(5)}.{ext}")
+            if simname == "quijote":
+                nsim = paths.quijote_fiducial_nsim(nsim, nobs)
+            fout = join(utils.fout, f"significance_{kind}_{simname}_{run}_{str(nsim).zfill(5)}.{ext}")  # noqa
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
+def plot_significance_mass(simname, run, nsim, nobs, kind, kwargs):
+    """
+    Plot significance of the 1NN distance as a function of the total mass.
+    """
+    assert kind in ["kl", "ks"]
+    paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
+    reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+
+    x = reader.read_single(simname, run, nsim, nobs)["mass"]
+    if kind == "kl":
+        y = make_kl(simname, run, nsim, nobs, kwargs)
+    else:
+        y = make_ks(simname, run, nsim, nobs, kwargs)
+
+    with plt.style.context(utils.mplstyle):
+        plt.figure()
+        plt.scatter(x, y)
+
+        plt.xscale("log")
+        plt.xlabel(r"$M_{\rm tot} / M_\odot$")
+        if kind == "ks":
+            plt.ylabel(r"$p$-value of $r_{1\mathrm{NN}}$ distribution")
+            plt.yscale("log")
+        else:
+            plt.ylabel(r"$D_{\mathrm{KL}}$ of $r_{1\mathrm{NN}}$ distribution")
+
+        plt.tight_layout()
+        for ext in ["png"]:
+            if simname == "quijote":
+                nsim = paths.quijote_fiducial_nsim(nsim, nobs)
+            fout = join(utils.fout, f"significance_vs_mass_{kind}_{simname}_{run}_{str(nsim).zfill(5)}.{ext}")  # noqa
             print(f"Saving to `{fout}`.")
             plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
         plt.close()
@@ -114,13 +175,15 @@ if __name__ == "__main__":
               "nbins_neighbour": 150,
               "paths_kind": csiborgtools.paths_glamdring}
 
-    cached_funcs = ["read_cdf"]
+    cached_funcs = ["read_dist", "make_kl", "make_ks"]
     if args.clean:
         for func in cached_funcs:
-            print(f"Cleaning cache for function {func}.")
+            print(f"Cleaning cache for function `{func}`.")
             delete_disk_caches_for_function(func)
 
-    # paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
-    # reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+    paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
+    reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+    run = "mass003"
 
-    plot_significance_hist("mass003", 7444, kwargs)
+    plot_significance_mass("quijote", run, 0, nobs=0, kind="ks",
+                           kwargs=kwargs)
