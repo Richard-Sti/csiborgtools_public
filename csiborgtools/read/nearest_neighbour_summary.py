@@ -19,10 +19,10 @@ the final snapshot.
 from math import floor
 
 import numpy
-from scipy.interpolate import interp1d
-from scipy.stats import kstest
-from scipy.special import erfinv
 from numba import jit
+from scipy.integrate import quad
+from scipy.interpolate import interp1d
+from scipy.stats import gaussian_kde, kstest
 from tqdm import tqdm
 
 
@@ -35,10 +35,16 @@ class NearestNeighbourReader:
     ----------
     rmax_radial : float
         Radius of the high-resolution region.
+    nbins_radial : int
+        Number of radial bins.
+    rmax_neighbour : float
+        Maximum distance to consider for the nearest neighbour.
+    nbins_neighbour : int
+        Number of bins for the nearest neighbour.
     paths : py:class`csiborgtools.read.Paths`
         Paths object.
-
-    TODO: docs
+    **kwargs : dict
+        Other keyword arguments for backward compatibility. Not used.
     """
     _paths = None
     _rmax_radial = None
@@ -202,11 +208,11 @@ class NearestNeighbourReader:
         fpath = self.paths.cross_nearest(simname, run, nsim, nobs)
         return numpy.load(fpath)
 
-    def build_cdf(self, simname, run, verbose=True):
+    def build_dist(self, simname, run, kind, verbose=True):
         """
-        Build the CDF for the nearest neighbour distribution. Counts the binned
-        number of neighbour for each halo as a funtion of its radial distance
-        from the centre of the high-resolution region and converts it to a CDF.
+        Build the a PDF or a CDF for the nearest neighbour distribution.
+        Counts the binned number of neighbour for each halo as a funtion of its
+        radial distance from the centre of the high-resolution region.
 
         Parameters
         ----------
@@ -214,18 +220,23 @@ class NearestNeighbourReader:
             Simulation name. Must be either `csiborg` or `quijote`.
         run : str
             Run name.
+        kind : str
+            Distribution kind. Either `pdf` or `cdf`.
         verbose : bool, optional
             Verbosity flag.
 
         Returns
         -------
-        cdf : 2-dimensional array of shape `(nbins_radial, nbins_neighbour)`
+        dist : 2-dimensional array of shape `(nbins_radial, nbins_neighbour)`
         """
         assert simname in ["csiborg", "quijote"]
+        assert kind in ["pdf", "cdf"]
         rbin_edges = self.radial_bin_edges
         # We first bin the distances as a function of each reference halo
         # radial distance and then its nearest neighbour distance.
         fpaths = self.paths.cross_nearest(simname, run)
+        if simname == "quijote":
+            fpaths = fpaths[:200]  # TODO remove later.
         out = numpy.zeros((self.nbins_radial, self.nbins_neighbour),
                           dtype=numpy.float32)
         for fpath in tqdm(fpaths) if verbose else fpaths:
@@ -234,15 +245,89 @@ class NearestNeighbourReader:
                 out, data["ndist"], data["rdist"], rbin_edges,
                 self.rmax_neighbour, self.nbins_neighbour)
 
-        # We then build up a CDF for each radial bin.
-        out = numpy.cumsum(out, axis=1, out=out)
-        out /= out[:, -1].reshape(-1, 1)
+        if kind == "pdf":
+            neighbour_bin_edges = self.neighbour_bin_edges
+            dx = neighbour_bin_edges[1] - neighbour_bin_edges[0]
+            out /= numpy.sum(dx * out, axis=1).reshape(-1, 1)
+        else:
+            out = numpy.cumsum(out, axis=1, out=out)
+            out /= out[:, -1].reshape(-1, 1)
         return out
 
-    def calc_significance(self, simname, run, nsim, cdf, nobs=None):
+    def kl_divergence(self, simname, run, nsim, pdf, nobs=None, verbose=True):
+        r"""
+        Calculate the Kullback-Leibler divergence of the nearest neighbour
+        distribution of a reference halo relative to an expected distribution
+        from an unconstrained suite of simulations. Approximates reference halo
+        neighbour distribution with a Gaussian KDE.
+
+        Parameters
+        ----------
+        simname : str
+            Simulation name. Must be either `csiborg` or `quijote`.
+        run : str
+            Run name.
+        nsim : int
+            Simulation index.
+        cdf : 2-dimensional array of shape `(nbins_radial, nbins_neighbour)`
+            CDF of the nearest neighbour distribution in an unconstrained
+            suite of simiulations.
+        nobs : int, optional
+            Fiducial Quijote observer index.
+        verbose : bool, optional
+            Verbosity flag.
+
+        Returns
+        -------
+        kl_divergence: 1-dimensional array of shape `(nhalos,)`
+            Information gain from going from the expected distribution to the
+            observed distribution in bits.
         """
-        Calculate the significance of the nearest neighbour distribution of a
-        reference halo relative to an unconstrained simulation.
+        assert simname in ["csiborg", "quijote"]
+        data = self.read_single(simname, run, nsim, nobs)
+
+        rdist = data["rdist"]
+        ndist = data["ndist"]
+        rbin_edges = self.radial_bin_edges
+
+        # Create an interpolation function for each radial bin.
+        xbin = self.bin_centres("neighbour")
+        interp_kwargs = {"kind": "cubic",
+                         "bounds_error": False,
+                         "fill_value": 1e-16,
+                         "assume_sorted": True}
+        pdf_interp = [interp1d(xbin, pdf[i, :], **interp_kwargs)
+                      for i in range(self.nbins_radial)]
+
+        def KL_density(x, p, q, p_norm, q_norm):
+            p = p(x) / p_norm
+            q = q(x) / q_norm
+            return p * numpy.log2(p / q)
+
+        # We loop over each halo and find its radial bin. Then calculate the
+        # KL divergence between the Quijote distribution and the sampled
+        # distribution in CSiBORG.
+        out = numpy.full(rdist.size, numpy.nan, dtype=numpy.float32)
+        cells = numpy.digitize(rdist, rbin_edges) - 1
+        for i, radial_cell in enumerate(tqdm(cells) if verbose else cells):
+            xmin, xmax = numpy.min(ndist[i, :]), numpy.max(ndist[i, :])
+            xrange = numpy.linspace(xmin, xmax, 1000)
+
+            ykde = gaussian_kde(ndist[i, :])(xrange)
+            kde = interp1d(xrange, ykde, **interp_kwargs)
+            kde_norm = quad(kde, xmin, xmax)[0]
+
+            out[i] = quad(
+                KL_density, xmin, xmax,
+                args=(kde, pdf_interp[radial_cell], kde_norm, 1.0),
+                limit=250, points=(xmin, xmax), epsabs=1e-4, epsrel=1e-4)[0]
+        return out
+
+    def ks_significance(self, simname, run, nsim, cdf, nobs=None):
+        r"""
+        Calculate the p-value significance of the nearest neighbour of a
+        reference halo relative to an unconstrained simulation using the
+        Kolmogorov–Smirnov test.
 
         Parameters
         ----------
@@ -260,8 +345,7 @@ class NearestNeighbourReader:
 
         Returns
         -------
-        sigma : 1-dimensional array of shape `(nhalos,)`
-            Significance of the nearest neighbour distribution of each halo.
+        pval : 1-dimensional array of shape `(nhalos,)`
         """
         assert simname in ["csiborg", "quijote"]
         data = self.read_single(simname, run, nsim, nobs)
@@ -282,13 +366,11 @@ class NearestNeighbourReader:
         # p-value under null hypothesis and convert it to a sigma value.
         out = numpy.full(rdist.size, numpy.nan, dtype=numpy.float64)
         for i, radial_cell in enumerate(numpy.digitize(rdist, rbin_edges) - 1):
-
             # The null hypothesis is that the distances in Quijote are larger
             # or equal to CSiBORG.
             ks = kstest(ndist[i, :], cdf_interp[radial_cell], N=10000,
-                        alternative="greater")
-            # We convert the p-value to a sigma value.
-            out[i] = - numpy.sqrt(2) * erfinv(ks.pvalue - 1)
+                        alternative="greater", method="exact")
+            out[i] = numpy.log10(ks.pvalue)
         return out
 
 
