@@ -370,7 +370,7 @@ class NearestNeighbourReader:
             # or equal to CSiBORG.
             ks = kstest(ndist[i, :], cdf_interp[radial_cell], N=10000,
                         alternative="greater", method="exact")
-            out[i] = numpy.log10(ks.pvalue)
+            out[i] = ks.pvalue
         return out
 
 
