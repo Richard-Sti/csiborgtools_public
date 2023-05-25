@@ -236,7 +236,7 @@ class NearestNeighbourReader:
         # radial distance and then its nearest neighbour distance.
         fpaths = self.paths.cross_nearest(simname, run)
         if simname == "quijote":
-            fpaths = fpaths[:200]  # TODO remove later.
+            fpaths = fpaths
         out = numpy.zeros((self.nbins_radial, self.nbins_neighbour),
                           dtype=numpy.float32)
         for fpath in tqdm(fpaths) if verbose else fpaths:
