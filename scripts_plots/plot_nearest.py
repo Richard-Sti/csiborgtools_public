@@ -164,6 +164,36 @@ def plot_significance_mass(simname, run, nsim, nobs, kind, kwargs):
         plt.close()
 
 
+def plot_kl_vs_ks(simname, run, nsim, nobs, kwargs):
+    """
+    Plot Kullback-Leibler divergence vs Kolmogorov-Smirnov statistic p-value.
+    """
+    paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
+    reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+
+    x = reader.read_single(simname, run, nsim, nobs)["mass"]
+    y_kl = make_kl(simname, run, nsim, nobs, kwargs)
+    y_ks = make_ks(simname, run, nsim, nobs, kwargs)
+
+    with plt.style.context(utils.mplstyle):
+        plt.figure()
+        plt.scatter(y_kl, y_ks, c=numpy.log10(x))
+        plt.colorbar(label=r"$\log M_{\rm tot} / M_\odot$")
+
+        plt.xlabel(r"$D_{\mathrm{KL}}$ of $r_{1\mathrm{NN}}$ distribution")
+        plt.ylabel(r"$p$-value of $r_{1\mathrm{NN}}$ distribution")
+        plt.yscale("log")
+
+        plt.tight_layout()
+        for ext in ["png"]:
+            if simname == "quijote":
+                nsim = paths.quijote_fiducial_nsim(nsim, nobs)
+            fout = join(utils.fout, f"kl_vs_ks{simname}_{run}_{str(nsim).zfill(5)}.{ext}")  # noqa
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-c', '--clean', action='store_true')
@@ -185,5 +215,16 @@ if __name__ == "__main__":
     reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
     run = "mass003"
 
-    plot_significance_mass("quijote", run, 0, nobs=0, kind="ks",
-                           kwargs=kwargs)
+    # for kind in ["pdf", "cdf"]:
+    #     plot_dist(run, kind, kwargs)
+    # for kind in ["kl", "ks"]:
+    #     # plot_significance_hist("csiborg", run, 7444, nobs=None, kind=kind,
+    #     #                        kwargs=kwargs)
+    #     plot_significance_mass("quijote", run, 0, nobs=0, kind=kind,
+    #                            kwargs=kwargs)
+
+    # plot_significance_mass("quijote", run, 0, nobs=0, kind="ks",
+    #                        kwargs=kwargs)
+
+    plot_kl_vs_ks("quijote", run, 0, nobs=0, kwargs=kwargs)
+    plot_kl_vs_ks("csiborg", run, 7444, nobs=None, kwargs=kwargs)
