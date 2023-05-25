@@ -13,15 +13,16 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-from argparse import ArgumentParser
 from os.path import join
+from argparse import ArgumentParser
 
 import matplotlib.pyplot as plt
 import numpy
-import scienceplots  # noqa
-from cache_to_disk import cache_to_disk, delete_disk_caches_for_function
 
+import scienceplots  # noqa
 import utils
+from cache_to_disk import cache_to_disk, delete_disk_caches_for_function
+from tqdm import tqdm
 
 try:
     import csiborgtools
@@ -29,6 +30,119 @@ except ModuleNotFoundError:
     import sys
     sys.path.append("../")
     import csiborgtools
+
+
+###############################################################################
+#                           IC overlap plotting                               #
+###############################################################################
+
+def open_cat(nsim):
+    """
+    Open a CSiBORG halo catalogue.
+    """
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+    bounds = {"totpartmass": (1e12, None)}
+    return csiborgtools.read.HaloCatalogue(nsim, paths, bounds=bounds)
+
+
+@cache_to_disk(7)
+def get_overlap(nsim0):
+    """
+    Calculate the summed overlap and probability of no match for a single
+    reference simulation.
+    """
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+    nsimxs = csiborgtools.read.get_cross_sims(nsim0, paths, smoothed=True)
+    cat0 = open_cat(nsim0)
+
+    catxs = []
+    for nsimx in tqdm(nsimxs):
+        catxs.append(open_cat(nsimx))
+
+    reader = csiborgtools.read.NPairsOverlap(cat0, catxs, paths)
+    x = reader.cat0("totpartmass")
+    summed_overlap = reader.summed_overlap(True)
+    prob_nomatch = reader.prob_nomatch(True)
+    return x, summed_overlap, prob_nomatch
+
+
+def plot_summed_overlap(nsim0):
+    """
+    Plot the summed overlap and probability of no matching for a single
+    reference simulation as a function of the reference halo mass.
+    """
+    x, summed_overlap, prob_nomatch = get_overlap(nsim0)
+
+    mean_overlap = numpy.mean(summed_overlap, axis=1)
+    std_overlap = numpy.std(summed_overlap, axis=1)
+
+    mean_prob_nomatch = numpy.mean(prob_nomatch, axis=1)
+    # std_prob_nomatch = numpy.std(prob_nomatch, axis=1)
+
+    mask = mean_overlap > 0
+    x = x[mask]
+    mean_overlap = mean_overlap[mask]
+    std_overlap = std_overlap[mask]
+    mean_prob_nomatch = mean_prob_nomatch[mask]
+
+    # Mean summed overlap
+    with plt.style.context(utils.mplstyle):
+        plt.figure()
+        plt.hexbin(x, mean_overlap, mincnt=1, xscale="log", bins="log",
+                   gridsize=50)
+        plt.colorbar(label="Counts in bins")
+        plt.xlabel(r"$M_{\rm tot} / M_\odot$")
+        plt.ylabel(r"$\langle \mathcal{O}_{a}^{\mathcal{A} \mathcal{B}} \rangle_{\mathcal{B}}$")  # noqa
+        plt.ylim(0., 1.)
+
+        plt.tight_layout()
+        for ext in ["png", "pdf"]:
+            fout = join(utils.fout, f"overlap_mean_{nsim0}.{ext}")
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+        plt.close()
+
+    # Std summed overlap
+    with plt.style.context(utils.mplstyle):
+        plt.figure()
+        plt.hexbin(x, std_overlap, mincnt=1, xscale="log", bins="log",
+                   gridsize=50)
+        plt.colorbar(label="Counts in bins")
+        plt.xlabel(r"$M_{\rm tot} / M_\odot$")
+        plt.ylabel(r"$\delta \left( \mathcal{O}_{a}^{\mathcal{A} \mathcal{B}} \right)_{\mathcal{B}}$")  # noqa
+        plt.ylim(0., 1.)
+        plt.tight_layout()
+
+        for ext in ["png", "pdf"]:
+            fout = join(utils.fout, f"overlap_std_{nsim0}.{ext}")
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+        plt.close()
+
+    # 1 - mean summed overlap vs mean prob nomatch
+    with plt.style.context(utils.mplstyle):
+        plt.figure()
+        plt.scatter(1 - mean_overlap, mean_prob_nomatch, c=numpy.log10(x), s=2,
+                    rasterized=True)
+        plt.colorbar(label=r"$\log_{10} M_{\rm halo} / M_\odot$")
+
+        t = numpy.linspace(0.3, 1, 100)
+        plt.plot(t, t, color="red", linestyle="--")
+
+        plt.xlabel(r"$1 - \langle \mathcal{O}_a^{\mathcal{A} \mathcal{B}} \rangle_{\mathcal{B}}$")  # noqa
+        plt.ylabel(r"$\langle \eta_a^{\mathcal{A} \mathcal{B}} \rangle_{\mathcal{B}}$")  # noqa
+        plt.tight_layout()
+
+        for ext in ["png", "pdf"]:
+            fout = join(utils.fout, f"overlap_vs_prob_nomatch_{nsim0}.{ext}")
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
+###############################################################################
+#                        Nearest neighbour plotting                           #
+###############################################################################
 
 
 @cache_to_disk(7)
@@ -199,32 +313,22 @@ if __name__ == "__main__":
     parser.add_argument('-c', '--clean', action='store_true')
     args = parser.parse_args()
 
-    kwargs = {"rmax_radial": 155 / 0.705,
-              "nbins_radial": 20,
-              "rmax_neighbour": 100.,
-              "nbins_neighbour": 150,
-              "paths_kind": csiborgtools.paths_glamdring}
-
-    cached_funcs = ["read_dist", "make_kl", "make_ks"]
+    cached_funcs = ["get_overlap", "read_dist", "make_kl", "make_ks"]
     if args.clean:
         for func in cached_funcs:
-            print(f"Cleaning cache for function `{func}`.")
+            print(f"Cleaning cache for function {func}.")
             delete_disk_caches_for_function(func)
 
-    paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
-    reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+    neighbour_kwargs = {"rmax_radial": 155 / 0.705,
+                        "nbins_radial": 20,
+                        "rmax_neighbour": 100.,
+                        "nbins_neighbour": 150,
+                        "paths_kind": csiborgtools.paths_glamdring}
+
+    paths = csiborgtools.read.Paths(**neighbour_kwargs["paths_kind"])
+    nn_reader = csiborgtools.read.NearestNeighbourReader(**neighbour_kwargs,
+                                                         paths=paths)
     run = "mass003"
 
-    # for kind in ["pdf", "cdf"]:
-    #     plot_dist(run, kind, kwargs)
-    # for kind in ["kl", "ks"]:
-    #     # plot_significance_hist("csiborg", run, 7444, nobs=None, kind=kind,
-    #     #                        kwargs=kwargs)
-    #     plot_significance_mass("quijote", run, 0, nobs=0, kind=kind,
-    #                            kwargs=kwargs)
-
-    # plot_significance_mass("quijote", run, 0, nobs=0, kind="ks",
-    #                        kwargs=kwargs)
-
-    plot_kl_vs_ks("quijote", run, 0, nobs=0, kwargs=kwargs)
-    plot_kl_vs_ks("csiborg", run, 7444, nobs=None, kwargs=kwargs)
+    # for ic in [7444, 8812, 9700]:
+    #     plot_summed_overlap(ic)
