@@ -56,14 +56,16 @@ def get_overlap(nsim0):
     cat0 = open_cat(nsim0)
 
     catxs = []
+    print("Opening catalogues...", flush=True)
     for nsimx in tqdm(nsimxs):
         catxs.append(open_cat(nsimx))
 
     reader = csiborgtools.read.NPairsOverlap(cat0, catxs, paths)
-    x = reader.cat0("totpartmass")
+    mass = reader.cat0("totpartmass")
+    hindxs = reader.cat0("index")
     summed_overlap = reader.summed_overlap(True)
     prob_nomatch = reader.prob_nomatch(True)
-    return x, summed_overlap, prob_nomatch
+    return mass, hindxs, summed_overlap, prob_nomatch
 
 
 def plot_summed_overlap(nsim0):
@@ -71,7 +73,7 @@ def plot_summed_overlap(nsim0):
     Plot the summed overlap and probability of no matching for a single
     reference simulation as a function of the reference halo mass.
     """
-    x, summed_overlap, prob_nomatch = get_overlap(nsim0)
+    x, __, summed_overlap, prob_nomatch = get_overlap(nsim0)
 
     mean_overlap = numpy.mean(summed_overlap, axis=1)
     std_overlap = numpy.std(summed_overlap, axis=1)
@@ -170,7 +172,7 @@ def make_ks(simname, run, nsim, nobs, kwargs):
     return reader.ks_significance(simname, run, nsim, cdf, nobs=nobs)
 
 
-def plot_dist(run, kind, kwargs):
+def plot_dist(run, kind, kwargs, r200):
     """
     Plot the PDF/CDF of the nearest neighbour distance for Quijote and CSiBORG.
     """
@@ -179,6 +181,8 @@ def plot_dist(run, kind, kwargs):
     paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
     reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
     x = reader.bin_centres("neighbour")
+    if r200 is not None:
+        x /= r200
 
     y_quijote = read_dist("quijote", run, kind, kwargs)
     y_csiborg = read_dist("csiborg", run, kind, kwargs)
@@ -196,7 +200,10 @@ def plot_dist(run, kind, kwargs):
             plt.plot(x, y_quijote[i], c="C0", label=label1)
             plt.plot(x, y_csiborg[i], c="C1", label=label2)
         plt.xlim(0, 75)
-        plt.xlabel(r"$r_{1\mathrm{NN}}~[\mathrm{Mpc}]$")
+        if r200 is None:
+            plt.xlabel(r"$r_{1\mathrm{NN}}~[\mathrm{Mpc}]$")
+        else:
+            plt.xlabel(r"$r_{1\mathrm{NN}} / R_{200c}$")
         if kind == "pdf":
             plt.ylabel(r"$p(r_{1\mathrm{NN}})$")
         else:
@@ -308,6 +315,63 @@ def plot_kl_vs_ks(simname, run, nsim, nobs, kwargs):
         plt.close()
 
 
+def plot_kl_vs_overlap(run, nsim, kwargs):
+    """
+    Plot KL divergence vs overlap.
+    """
+    paths = csiborgtools.read.Paths(**kwargs["paths_kind"])
+    nn_reader = csiborgtools.read.NearestNeighbourReader(**kwargs, paths=paths)
+    nn_data = nn_reader.read_single("csiborg", run, nsim, nobs=None)
+    nn_hindxs = nn_data["ref_hindxs"]
+
+    mass, overlap_hindxs, summed_overlap, prob_nomatch = get_overlap(nsim)
+
+    # We need to match the hindxs between the two.
+    hind2overlap_array = {hind: i for i, hind in enumerate(overlap_hindxs)}
+    mask = numpy.asanyarray([hind2overlap_array[hind] for hind in nn_hindxs])
+
+    summed_overlap = summed_overlap[mask]
+    prob_nomatch = prob_nomatch[mask]
+    mass = mass[mask]
+
+    kl = make_kl("csiborg", run, nsim, nobs=None, kwargs=kwargs)
+
+    with plt.style.context(utils.mplstyle):
+        plt.figure()
+        mu = numpy.mean(prob_nomatch, axis=1)
+        plt.scatter(kl, 1 - mu, c=numpy.log10(mass))
+        plt.colorbar(label=r"$\log M_{\rm tot} / M_\odot$")
+        plt.xlabel(r"$D_{\mathrm{KL}}$ of $r_{1\mathrm{NN}}$ distribution")
+        plt.ylabel(r"$1 - \langle \eta^{\mathcal{B}}_a \rangle_{\mathcal{B}}$")
+
+        plt.tight_layout()
+        for ext in ["png"]:
+            fout = join(utils.fout, f"kl_vs_overlap_mean_{run}_{str(nsim).zfill(5)}.{ext}")  # noqa
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+        plt.close()
+
+    with plt.style.context(utils.mplstyle):
+        plt.figure()
+        std = numpy.std(prob_nomatch, axis=1)
+        plt.scatter(kl, std, c=numpy.log10(mass))
+        plt.colorbar(label=r"$\log M_{\rm tot} / M_\odot$")
+        plt.xlabel(r"$D_{\mathrm{KL}}$ of $r_{1\mathrm{NN}}$ distribution")
+        plt.ylabel(r"$\langle \left(\eta^{\mathcal{B}}_a - \langle \eta^{\mathcal{B}^\prime}_a \rangle_{\mathcal{B}^\prime}\right)^2\rangle_{\mathcal{B}}^{1/2}$")  # noqa
+
+        plt.tight_layout()
+        for ext in ["png"]:
+            fout = join(utils.fout, f"kl_vs_overlap_std_{run}_{str(nsim).zfill(5)}.{ext}")  # noqa
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
+###############################################################################
+#                        Command line interface                               #
+###############################################################################
+
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-c', '--clean', action='store_true')
@@ -320,15 +384,30 @@ if __name__ == "__main__":
             delete_disk_caches_for_function(func)
 
     neighbour_kwargs = {"rmax_radial": 155 / 0.705,
-                        "nbins_radial": 20,
+                        "nbins_radial": 50,
                         "rmax_neighbour": 100.,
                         "nbins_neighbour": 150,
                         "paths_kind": csiborgtools.paths_glamdring}
+    run = "mass003"
+
+    # plot_dist("mass003", "pdf", neighbour_kwargs)
 
     paths = csiborgtools.read.Paths(**neighbour_kwargs["paths_kind"])
     nn_reader = csiborgtools.read.NearestNeighbourReader(**neighbour_kwargs,
                                                          paths=paths)
-    run = "mass003"
 
-    # for ic in [7444, 8812, 9700]:
-    #     plot_summed_overlap(ic)
+    # sizes = numpy.full(2700, numpy.nan)
+    # from tqdm import trange
+    # k = 0
+    # for nsim in trange(100):
+    #     for nobs in range(27):
+    #         d = nn_reader.read_single("quijote", run, nsim, nobs)
+    #         sizes[k] = d["mass"].size
+
+    #         k += 1
+    # print(sizes)
+    # print(numpy.mean(sizes), numpy.std(sizes))
+
+    # plot_kl_vs_overlap("mass003", 7444, neighbour_kwargs)
+
+    # plot_cdf_r200("mass003", neighbour_kwargs)
