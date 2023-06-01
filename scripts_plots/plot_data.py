@@ -18,6 +18,7 @@ from argparse import ArgumentParser
 
 import matplotlib.pyplot as plt
 import numpy
+import healpy
 
 import scienceplots  # noqa
 import utils
@@ -69,6 +70,11 @@ def plot_mass_vs_ncells(nsim, pdf=False):
             print(f"Saving to `{fout}`.")
             plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
         plt.close()
+
+
+###############################################################################
+#                              HMF plot                                       #
+###############################################################################
 
 
 def process_counts(counts):
@@ -157,6 +163,64 @@ def plot_hmf(pdf=False):
 
 
 ###############################################################################
+#                           Sky distribution                                  #
+###############################################################################
+
+@cache_to_disk(7)
+def load_field(kind, nsim, grid, MAS, in_rsp=False):
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+    return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=False))
+
+
+def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
+                          plot_halos=None, pdf=False):
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+    nsnap = max(paths.get_snapshots(nsim))
+    box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
+
+    field = load_field(kind, nsim, grid, MAS=MAS, in_rsp=False)
+
+    angpos = csiborgtools.field.nside2radec(nside)
+    dist = numpy.linspace(0, 155.5 / 0.705, 500)
+    out = csiborgtools.field.make_sky(field, angpos=angpos, dist=dist, box=box)
+
+    with plt.style.context(utils.mplstyle):
+        if kind == "density":
+            label = r"$\log \int_{0}^{R} r^2 \delta(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
+            out = numpy.log10(out)
+        elif kind == "potential":
+            label = r"$\log \int_{0}^{R} r^2 \phi(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
+        else:
+            label = None
+
+        healpy.mollview(out, fig=0, title="", unit=label)
+
+        if plot_halos is not None:
+            bounds = {"dist": (0, 155.5 / 0.705),
+                      "totpartmass": (plot_halos, None)}
+            cat = csiborgtools.read.HaloCatalogue(nsim, paths, bounds=bounds)
+            X = cat.position(cartesian=False)
+            healpy.projscatter(numpy.deg2rad(X[:, 2] + 90),
+                               numpy.deg2rad(X[:, 1]),
+                               s=1, c="red", label="CSiBORG haloes")
+
+        if plot_groups:
+            groups = csiborgtools.read.TwoMPPGroups(fpath="/mnt/extraspace/rstiskalek/catalogs/2M++_group_catalog.dat")  # noqa
+            healpy.projscatter(numpy.deg2rad(groups["DEC"] + 90),
+                               numpy.deg2rad(groups["RA"]), s=1, c="blue",
+                               label="2M++ groups")
+
+        if plot_halos is not None or plot_groups:
+            plt.legend(markerscale=10)
+
+        for ext in ["png"] if pdf is False else ["png", "pdf"]:
+            fout = join(utils.fout, f"sky_{kind}_{nsim}.{ext}")
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
+###############################################################################
 #                        Command line interface                               #
 ###############################################################################
 
@@ -175,4 +239,6 @@ if __name__ == "__main__":
     # plot_mass_vs_occupancy(7444)
     # plot_mass_vs_normcells(7444 + 24 * 4, pdf=False)
     # plot_mass_vs_ncells(7444, pdf=True)
-    plot_hmf(pdf=True)
+    # plot_hmf(pdf=True)
+    plot_sky_distribution("density", 7444, 256, nside=64, plot_groups=False,
+                          plot_halos=5e13)
