@@ -79,15 +79,14 @@ def evaluate_sky(*fields, pos, box, isdeg=True):
     pos = force_single_precision(pos, "pos")
     # We first calculate convert the distance to box coordinates and then
     # convert to Cartesian coordinates.
-    X = numpy.copy(pos)
-    X[:, 0] = box.mpc2box(X[:, 0])
+    pos[:, 0] = box.mpc2box(pos[:, 0])
     X = radec_to_cartesian(pos, isdeg)
     # Then we move the origin to match the box coordinates
-    X -= 0.5
+    X += 0.5
     return evaluate_cartesian(*fields, pos=X)
 
 
-def make_sky(field, angpos, dist, verbose=True):
+def make_sky(field, angpos, dist, box, verbose=True):
     r"""
     Make a sky map of a scalar field. The observer is in the centre of the
     box the field is evaluated along directions `angpos`. Along each
@@ -103,7 +102,9 @@ def make_sky(field, angpos, dist, verbose=True):
         :math:`\in [0, 360]` and dec :math:`\in [-90, 90]` degrees,
         respectively.
     dist : 1-dimensional array
-        Radial distances to evaluate the field.
+        Uniformly spaced radial distances to evaluate the field.
+    box : :py:class:`csiborgtools.read.CSiBORGBox`
+        The simulation box information and transformations.
     verbose : bool, optional
         Verbosity flag.
 
@@ -111,14 +112,19 @@ def make_sky(field, angpos, dist, verbose=True):
     -------
     interp_field : 1-dimensional array of shape `(n_pos, )`.
     """
+    dx = dist[1] - dist[0]
+    assert numpy.allclose(dist[1:] - dist[:-1], dx)
     assert angpos.ndim == 2 and dist.ndim == 1
     # We loop over the angular directions, at each step evaluating a vector
     # of distances. We pre-allocate arrays for speed.
     dir_loop = numpy.full((dist.size, 3), numpy.nan, dtype=numpy.float32)
     ndir = angpos.shape[0]
-    out = numpy.zeros(ndir, numpy.nan, dtype=numpy.float32)
+    out = numpy.full(ndir, numpy.nan, dtype=numpy.float32)
     for i in trange(ndir) if verbose else range(ndir):
-        dir_loop[1, :] = angpos[i, 0]
-        dir_loop[2, :] = angpos[i, 1]
-        out[i] = numpy.sum(evaluate_sky(field, dir_loop, isdeg=True))
+        dir_loop[:, 0] = dist
+        dir_loop[:, 1] = angpos[i, 0]
+        dir_loop[:, 2] = angpos[i, 1]
+        out[i] = numpy.sum(
+            dist**2 * evaluate_sky(field, pos=dir_loop, box=box, isdeg=True))
+    out *= dx
     return out
