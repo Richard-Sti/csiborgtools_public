@@ -154,15 +154,15 @@ class TwoMPPGroups(TextSurvey):
         # Pre-allocate and fill the array
         cols = [("RA", numpy.float64), ("DEC", numpy.float64),
                 ("K2mag", numpy.float64), ("Rich", numpy.int64),
-                ("sigma", numpy.float64e)]
+                ("sigma", numpy.float64)]
         data = cols_to_structured(cat.shape[0], cols)
         data["K2mag"] = cat[:, 3]
         data["Rich"] = cat[:, 4]
         data["sigma"] = cat[:, 7]
 
         # Convert galactic coordinates to RA, dec
-        glon = data[:, 1]
-        glat = data[:, 2]
+        glon = cat[:, 1]
+        glat = cat[:, 2]
         coords = SkyCoord(l=glon * units.degree, b=glat * units.degree,
                           frame='galactic')
         coords = coords.transform_to("icrs")
