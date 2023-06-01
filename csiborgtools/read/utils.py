@@ -75,10 +75,10 @@ def radec_to_cartesian(X, isdeg=True):
     if isdeg:
         ra = numpy.deg2rad(ra)
         dec = numpy.deg2rad(dec)
-    x = numpy.cos(dec) * numpy.cos(ra)
-    y = numpy.cos(dec) * numpy.sin(ra)
-    z = numpy.sin(dec)
-    return dist * numpy.vstack([x, y, z]).T
+    x = dist * numpy.cos(dec) * numpy.cos(ra)
+    y = dist * numpy.cos(dec) * numpy.sin(ra)
+    z = dist * numpy.sin(dec)
+    return numpy.vstack([x, y, z]).T
 
 
 def real2redshift(pos, vel, origin, box, in_box_units, periodic_wrap=True,
