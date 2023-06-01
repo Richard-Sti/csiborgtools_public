@@ -17,6 +17,7 @@ Utility functions for the field module.
 """
 from warnings import warn
 
+import healpy
 import numpy
 import smoothing_library as SL
 
@@ -65,3 +66,23 @@ def smoothen_field(field, smooth_scale, boxsize, threads=1):
     W_k = SL.FT_filter(boxsize, smooth_scale, field.shape[0], "Gaussian",
                        threads)
     return SL.field_smoothing(field, W_k, threads)
+
+
+def nside2radec(nside):
+    """
+    Generate RA and declination for HEALPix pixel centres.
+
+    Parameters
+    ----------
+    nside : int
+        HEALPix nside parameter.
+
+    Returns
+    -------
+    radec : array of shape `(npix, 2)`
+        RA and declination in degrees.
+    """
+    pixs = numpy.arange(healpy.nside2npix(nside))
+    theta, phi = healpy.pix2ang(nside, pixs)
+    theta -= numpy.pi / 2
+    return numpy.rad2deg(numpy.vstack([phi, theta]).T)
