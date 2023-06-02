@@ -193,6 +193,9 @@ def get_sky_label(kind, volume_weight):
 def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
                           dmin=0, dmax=220, plot_halos=None,
                           volume_weight=True, pdf=False):
+    """
+    NOTE: add distance for groups.
+    """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsnap = max(paths.get_snapshots(nsim))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
