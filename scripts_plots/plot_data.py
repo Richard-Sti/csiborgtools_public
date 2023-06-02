@@ -169,7 +169,7 @@ def plot_hmf(pdf=False):
 @cache_to_disk(7)
 def load_field(kind, nsim, grid, MAS, in_rsp=False):
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=False))
+    return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=in_rsp))
 
 
 def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
@@ -189,7 +189,7 @@ def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
             label = r"$\log \int_{0}^{R} r^2 \delta(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
             out = numpy.log10(out)
         elif kind == "potential":
-            label = r"$\log \int_{0}^{R} r^2 \phi(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
+            label = r"$\int_{0}^{R} r^2 \phi(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
         else:
             label = None
 
@@ -240,5 +240,5 @@ if __name__ == "__main__":
     # plot_mass_vs_normcells(7444 + 24 * 4, pdf=False)
     # plot_mass_vs_ncells(7444, pdf=True)
     # plot_hmf(pdf=True)
-    plot_sky_distribution("density", 7444, 256, nside=64, plot_groups=False,
+    plot_sky_distribution("potential", 7444, 256, nside=64, plot_groups=False,
                           plot_halos=5e13)
