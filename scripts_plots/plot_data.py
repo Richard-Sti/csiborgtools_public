@@ -172,8 +172,27 @@ def load_field(kind, nsim, grid, MAS, in_rsp=False):
     return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=in_rsp))
 
 
+def get_sky_label(kind, volume_weight):
+    if volume_weight:
+        if kind == "density":
+            label = r"$\log \int_{0}^{R} r^2 \delta(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
+        elif kind == "potential":
+            label = r"$\int_{0}^{R} r^2 \phi(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
+        else:
+            label = None
+    else:
+        if kind == "density":
+            label = r"$\log \int_{0}^{R} \delta(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
+        elif kind == "potential":
+            label = r"$\int_{0}^{R} \phi(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
+        else:
+            label = None
+    return label
+
+
 def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
-                          plot_halos=None, pdf=False):
+                          dmin=0, dmax=220, plot_halos=None,
+                          volume_weight=True, pdf=False):
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsnap = max(paths.get_snapshots(nsim))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
@@ -181,22 +200,18 @@ def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
     field = load_field(kind, nsim, grid, MAS=MAS, in_rsp=False)
 
     angpos = csiborgtools.field.nside2radec(nside)
-    dist = numpy.linspace(0, 155.5 / 0.705, 500)
-    out = csiborgtools.field.make_sky(field, angpos=angpos, dist=dist, box=box)
+    dist = numpy.linspace(dmin, dmax, 500)
+    out = csiborgtools.field.make_sky(field, angpos=angpos, dist=dist, box=box,
+                                      volume_weight=volume_weight)
 
     with plt.style.context(utils.mplstyle):
+        label = get_sky_label(kind, volume_weight)
         if kind == "density":
-            label = r"$\log \int_{0}^{R} r^2 \delta(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
             out = numpy.log10(out)
-        elif kind == "potential":
-            label = r"$\int_{0}^{R} r^2 \phi(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
-        else:
-            label = None
-
         healpy.mollview(out, fig=0, title="", unit=label)
 
         if plot_halos is not None:
-            bounds = {"dist": (0, 155.5 / 0.705),
+            bounds = {"dist": (dmin, dmax),
                       "totpartmass": (plot_halos, None)}
             cat = csiborgtools.read.HaloCatalogue(nsim, paths, bounds=bounds)
             X = cat.position(cartesian=False)
@@ -214,7 +229,7 @@ def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
             plt.legend(markerscale=10)
 
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
-            fout = join(utils.fout, f"sky_{kind}_{nsim}.{ext}")
+            fout = join(utils.fout, f"sky_{kind}_{nsim}_from_{dmin}_to_{dmax}_vol{volume_weight}.{ext}")  # noqa
             print(f"Saving to `{fout}`.")
             plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
         plt.close()
@@ -241,4 +256,5 @@ if __name__ == "__main__":
     # plot_mass_vs_ncells(7444, pdf=True)
     # plot_hmf(pdf=True)
     plot_sky_distribution("potential", 7444, 256, nside=64, plot_groups=False,
-                          plot_halos=5e13)
+                          dmin=50, dmax=100, plot_halos=5e13,
+                          volume_weight=True)
