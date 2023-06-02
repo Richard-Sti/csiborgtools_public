@@ -86,7 +86,7 @@ def evaluate_sky(*fields, pos, box, isdeg=True):
     return evaluate_cartesian(*fields, pos=X)
 
 
-def make_sky(field, angpos, dist, box, verbose=True):
+def make_sky(field, angpos, dist, box, volume_weight=True, verbose=True):
     r"""
     Make a sky map of a scalar field. The observer is in the centre of the
     box the field is evaluated along directions `angpos`. Along each
@@ -105,6 +105,9 @@ def make_sky(field, angpos, dist, box, verbose=True):
         Uniformly spaced radial distances to evaluate the field.
     box : :py:class:`csiborgtools.read.CSiBORGBox`
         The simulation box information and transformations.
+    volume_weight : bool, optional
+        Whether to weight the field by the volume of the pixel, i.e. a
+        :math:`r^2` correction.
     verbose : bool, optional
         Verbosity flag.
 
@@ -118,13 +121,19 @@ def make_sky(field, angpos, dist, box, verbose=True):
     # We loop over the angular directions, at each step evaluating a vector
     # of distances. We pre-allocate arrays for speed.
     dir_loop = numpy.full((dist.size, 3), numpy.nan, dtype=numpy.float32)
+    boxdist = box.mpc2box(dist)
     ndir = angpos.shape[0]
     out = numpy.full(ndir, numpy.nan, dtype=numpy.float32)
     for i in trange(ndir) if verbose else range(ndir):
         dir_loop[:, 0] = dist
         dir_loop[:, 1] = angpos[i, 0]
         dir_loop[:, 2] = angpos[i, 1]
-        out[i] = numpy.sum(
-            dist**2 * evaluate_sky(field, pos=dir_loop, box=box, isdeg=True))
+        if volume_weight:
+            out[i] = numpy.sum(
+                boxdist**2
+                * evaluate_sky(field, pos=dir_loop, box=box, isdeg=True))
+        else:
+            out[i] = numpy.sum(
+                evaluate_sky(field, pos=dir_loop, box=box, isdeg=True))
     out *= dx
     return out
