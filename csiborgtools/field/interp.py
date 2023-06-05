@@ -180,10 +180,9 @@ def field2rsp(field, parts, box, nbatch=30, flip_partsxz=True, init_value=0.,
     ----------
     field : 3-dimensional array of shape `(grid, grid, grid)`
         Real space field to be evolved to redshift space.
-    parts_pos : 2-dimensional array of shape `(n_parts, 3)`
-        Particle positions in real space.
-    parts_vel : 2-dimensional array of shape `(n_parts, 3)`
-        Particle velocities in real space.
+    parts : 2-dimensional array of shape `(n_parts, 6)`
+        Particle positions and velocities in real space. Must be organised as
+        `x, y, z, vx, vy, vz`.
     box : :py:class:`csiborgtools.read.CSiBORGBox`
         The simulation box information and transformations.
     nbatch : int, optional
