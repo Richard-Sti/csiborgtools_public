@@ -173,8 +173,7 @@ def field2rsp(field, parts, box, nbatch=30, flip_partsxz=True, init_value=0.,
     """
     Forward model real space scalar field to redshift space. Attaches field
     values to particles, those are then moved to redshift space and from their
-    positions reconstructs back the field on a regular grid by NGP
-    interpolation. This by definition produces a discontinuous field.
+    positions reconstructs back the field on a grid by NGP interpolation.
 
     Parameters
     ----------
@@ -190,7 +189,7 @@ def field2rsp(field, parts, box, nbatch=30, flip_partsxz=True, init_value=0.,
         Particles are assumed to be lazily loaded to memory.
     flip_partsxz : bool, optional
         Whether to flip the x and z coordinates of the particles. This is
-        because of a BORG bug.
+        because of a RAMSES bug.
     init_value : float, optional
         Initial value of the RSP field on the grid.
     verbose : bool, optional
@@ -233,3 +232,43 @@ def field2rsp(field, parts, box, nbatch=30, flip_partsxz=True, init_value=0.,
     # Finally divide by the number of particles in each cell and smooth.
     divide_nonzero(rsp_field, cellcounts)
     return rsp_field
+
+
+@jit(nopython=True)
+def fill_outside(field, fill_value, rmax, boxsize):
+    """
+    Fill cells outside of a sphere of radius `rmax` with `fill_value`. Centered
+    in the middle of the box.
+
+    Parameters
+    ----------
+    field : 3-dimensional array of shape `(grid, grid, grid)`
+        Field to be filled.
+    fill_value : float
+        Value to fill the field with.
+    rmax : float
+        Radius outside of which to fill the field..
+    boxsize : float
+        Size of the box.
+
+    Returns
+    -------
+    field : 3-dimensional array of shape `(grid, grid, grid)`
+    """
+    imax, jmax, kmax = field.shape
+    assert imax == jmax == kmax
+    N = imax
+    # Squared radial distance from the center of the box in box units.
+    rmax_box2 = (N * rmax / boxsize)**2
+    # print("Box ", rmax_box2)
+
+    for i in range(N):
+        idist2 = (i - 0.5 * (N - 1))**2
+        for j in range(N):
+            jdist2 = (j - 0.5 * (N - 1))**2
+            for k in range(N):
+                kdist2 = (k - 0.5 * (N - 1))**2
+                # print(idist2 + jdist2 + kdist2 > rmax_box2)
+                if idist2 + jdist2 + kdist2 > rmax_box2:
+                    field[i, j, k] = fill_value
+    return field
