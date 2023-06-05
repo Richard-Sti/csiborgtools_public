@@ -18,7 +18,6 @@ Tools for interpolating 3D fields at arbitrary positions.
 import MAS_library as MASL
 import numpy
 from numba import jit
-from scipy.ndimage import gaussian_filter
 from tqdm import trange
 
 from ..read.utils import radec_to_cartesian, real2redshift
