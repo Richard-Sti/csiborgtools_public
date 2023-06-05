@@ -165,7 +165,6 @@ def plot_hmf(pdf=False):
 @cache_to_disk(7)
 def load_field(kind, nsim, grid, MAS, in_rsp=False):
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    print(paths.field(kind, MAS, grid, nsim, in_rsp=in_rsp))
     return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=in_rsp))
 
 
@@ -174,7 +173,8 @@ def load_field(kind, nsim, grid, MAS, in_rsp=False):
 ###############################################################################
 
 
-def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS", pdf=False):
+def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
+                         highres_only=True, pdf=False):
     print(f"Plotting projected field `{kind}`. ", flush=True)
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsnap = max(paths.get_snapshots(nsim))
@@ -187,14 +187,20 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS", pdf=False):
     else:
         field = load_field(kind, nsim, grid, MAS=MAS, in_rsp=in_rsp)
 
-    print(field)
+    if highres_only:
+        csiborgtools.field.fill_outside(field, numpy.nan, rmax=155.5,
+                                        boxsize=677.7)
+        start = field.shape[0] // 4
+        end = field.shape[0] - start
+        field = field[start:end, start:end, start:end]
 
     with plt.style.context(utils.mplstyle):
         fig, ax = plt.subplots(figsize=(3.5 * 2, 2.625), ncols=3, sharey=True,
                                sharex=True)
         fig.subplots_adjust(hspace=0, wspace=0)
         for i in range(3):
-            ax[i].imshow(numpy.sum(field, axis=i))
+            im = ax[i].imshow(numpy.nanmean(field, axis=i))
+        fig.colorbar(im)
 
         fig.tight_layout(h_pad=0, w_pad=0)
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
