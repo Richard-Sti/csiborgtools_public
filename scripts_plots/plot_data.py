@@ -190,17 +190,29 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
     if highres_only:
         csiborgtools.field.fill_outside(field, numpy.nan, rmax=155.5,
                                         boxsize=677.7)
-        start = field.shape[0] // 4
-        end = field.shape[0] - start
+        # start = field.shape[0] // 4
+        start = round(field.shape[0] * 0.27)
+        end = round(field.shape[0] * 0.73)
+        # end = field.shape[0] - start
         field = field[start:end, start:end, start:end]
 
+    labels = [r"$y-z$", r"$x-z$", r"$x-y$"]
     with plt.style.context(utils.mplstyle):
         fig, ax = plt.subplots(figsize=(3.5 * 2, 2.625), ncols=3, sharey=True,
                                sharex=True)
         fig.subplots_adjust(hspace=0, wspace=0)
         for i in range(3):
-            im = ax[i].imshow(numpy.nanmean(field, axis=i))
-        fig.colorbar(im)
+            img = numpy.nanmean(field, axis=i)
+            if i == 0:
+                vmin, vmax = numpy.nanpercentile(img, [1, 99])
+                im = ax[i].imshow(numpy.nanmean(field, axis=i), vmin=vmin,
+                                  vmax=vmax)
+            else:
+                ax[i].imshow(numpy.nanmean(field, axis=i), vmin=vmin,
+                             vmax=vmax)
+            ax[i].set_title(labels[i])
+        cbar_ax = fig.add_axes([1.0, 0.1, 0.025, 0.8])
+        fig.colorbar(im, cax=cbar_ax, label="Mean projected field")
 
         fig.tight_layout(h_pad=0, w_pad=0)
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
