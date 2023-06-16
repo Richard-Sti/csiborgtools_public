@@ -35,6 +35,13 @@ except ModuleNotFoundError:
 
 
 def plot_knn(runname):
+    """
+    Plot the kNN CDF for a given runname.
+
+    Parameters
+    ----------
+    runname : str
+    """
     print(f"Plotting kNN CDF for {runname}.")
     cols = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
