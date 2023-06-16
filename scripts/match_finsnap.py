@@ -19,12 +19,14 @@ MPI parallelized over the reference simulations.
 from argparse import ArgumentParser
 from datetime import datetime
 from distutils.util import strtobool
+from os import remove
 
 import numpy
 import yaml
 from mpi4py import MPI
-
 from taskmaster import work_delegation
+from tqdm import trange
+
 from utils import open_catalogues
 
 try:
@@ -36,7 +38,7 @@ except ModuleNotFoundError:
     import csiborgtools
 
 
-def find_neighbour(args, nsim, cats, paths, comm):
+def find_neighbour(args, nsim, cats, paths, comm, save_kind):
     """
     Find the nearest neighbour of each halo in the given catalogue.
 
@@ -53,23 +55,78 @@ def find_neighbour(args, nsim, cats, paths, comm):
         Paths object.
     comm : mpi4py.MPI.Comm
         MPI communicator.
+    save_kind : str
+        Kind of data to save. Must be either `dist` or `bin_dist`.
 
     Returns
     -------
     None
     """
+    assert save_kind in ["dist", "bin_dist"]
     ndist, cross_hindxs = csiborgtools.match.find_neighbour(nsim, cats)
-
     mass_key = "totpartmass" if args.simname == "csiborg" else "group_mass"
     cat0 = cats[nsim]
-    mass = cat0[mass_key]
     rdist = cat0.radial_distance(in_initial=False)
 
-    fout = paths.cross_nearest(args.simname, args.run, nsim)
+    # Distance is saved optionally, whereas binned distance is always saved.
+    if save_kind == "dist":
+        out = {"ndist": ndist,
+               "cross_hindxs": cross_hindxs,
+               "mass": cat0[mass_key],
+               "ref_hindxs": cat0["index"],
+               "rdist": rdist}
+        fout = paths.cross_nearest(args.simname, args.run, "dist", nsim)
+        if args.verbose:
+            print(f"Rank {comm.Get_rank()} writing to `{fout}`.", flush=True)
+        numpy.savez(fout, **out)
+
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+    reader = csiborgtools.read.NearestNeighbourReader(
+        paths=paths, **csiborgtools.neighbour_kwargs)
+    counts = numpy.zeros((reader.nbins_radial, reader.nbins_neighbour),
+                         dtype=numpy.float32)
+    counts = reader.count_neighbour(counts, ndist, rdist)
+    out = {"counts": counts}
+    fout = paths.cross_nearest(args.simname, args.run, "bin_dist", nsim)
     if args.verbose:
         print(f"Rank {comm.Get_rank()} writing to `{fout}`.", flush=True)
-    numpy.savez(fout, ndist=ndist, cross_hindxs=cross_hindxs, mass=mass,
-                ref_hindxs=cat0["index"], rdist=rdist)
+    numpy.savez(fout, **out)
+
+
+def collect_dist(args, paths):
+    """
+    Collect the binned nearest neighbour distances into a single file.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command line arguments.
+    paths : csiborgtools.paths.Paths
+        Paths object.
+
+    Returns
+    -------
+    """
+    fnames = paths.cross_nearest(args.simname, args.run, "bin_dist")
+
+    if args.verbose:
+        print("Collecting counts into a single file.", flush=True)
+
+    for i in trange(len(fnames)) if args.verbose else range(len(fnames)):
+        fname = fnames[i]
+        data = numpy.load(fname)
+        if i == 0:
+            out = data["counts"]
+        else:
+            out += data["counts"]
+
+        remove(fname)
+
+    fout = paths.cross_nearest(args.simname, args.run, "tot_counts",
+                               nsim=0, nobs=0)
+    if args.verbose:
+        print(f"Writing the summed counts to `{fout}`.", flush=True)
+    numpy.savez(fout, tot_counts=out)
 
 
 if __name__ == "__main__":
@@ -87,16 +144,23 @@ if __name__ == "__main__":
     with open("./match_finsnap.yml", "r") as file:
         config = yaml.safe_load(file)
 
+    if args.simname == "csiborg":
+        save_kind = "dist"
+    else:
+        save_kind = "bin_dist"
+
     comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     cats = open_catalogues(args, config, paths, comm)
 
     def do_work(nsim):
-        return find_neighbour(args, nsim, cats, paths, comm)
+        return find_neighbour(args, nsim, cats, paths, comm, save_kind)
 
     work_delegation(do_work, list(cats.keys()), comm,
                     master_verbose=args.verbose)
 
     comm.Barrier()
-    if comm.Get_rank() == 0:
+    if rank == 0:
+        collect_dist(args, paths)
         print(f"{datetime.now()}: all finished. Quitting.")

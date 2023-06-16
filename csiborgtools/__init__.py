@@ -19,3 +19,26 @@ paths_glamdring = {"srcdir": "/mnt/extraspace/hdesmond/",
                    "postdir": "/mnt/extraspace/rstiskalek/CSiBORG/",
                    "quijote_dir": "/mnt/extraspace/rstiskalek/Quijote",
                    }
+
+
+neighbour_kwargs = {"rmax_radial": 155 / 0.705,
+                    "nbins_radial": 50,
+                    "rmax_neighbour": 100.,
+                    "nbins_neighbour": 150,
+                    "paths_kind": paths_glamdring}
+
+
+###############################################################################
+#                             Surveys                                         #
+###############################################################################
+
+class SDSS:
+    @staticmethod
+    def steps(cls):
+        return [(lambda x: cls[x], ("IN_DR7_LSS",)),
+                (lambda x: cls[x] < 17.6, ("ELPETRO_APPMAG_r", )),
+                (lambda x: cls[x] < 155, ("DIST", ))
+                ]
+
+    def __call__(self):
+        return read.SDSS(h=1, sel_steps=self.steps)

@@ -19,10 +19,11 @@ the final snapshot.
 from math import floor
 
 import numpy
-from numba import jit
-from scipy.integrate import quad
+from scipy.integrate import cumulative_trapezoid, quad
 from scipy.interpolate import interp1d
 from scipy.stats import gaussian_kde, kstest
+
+from numba import jit
 from tqdm import tqdm
 
 
@@ -205,54 +206,57 @@ class NearestNeighbourReader:
             Archive with keys `ndist`, `rdist`, `mass`, `cross_hindxs``
         """
         assert simname in ["csiborg", "quijote"]
-        fpath = self.paths.cross_nearest(simname, run, nsim, nobs)
+        fpath = self.paths.cross_nearest(simname, run, "dist", nsim, nobs)
         return numpy.load(fpath)
 
-    def build_dist(self, simname, run, kind, verbose=True):
+    def count_neighbour(self, out, ndist, rdist):
         """
-        Build the a PDF or a CDF for the nearest neighbour distribution.
-        Counts the binned number of neighbour for each halo as a funtion of its
-        radial distance from the centre of the high-resolution region.
+        Count the number of neighbours for each halo as a function of its
+        radial distance.
 
         Parameters
         ----------
-        simname : str
-            Simulation name. Must be either `csiborg` or `quijote`.
-        run : str
-            Run name.
-        kind : str
-            Distribution kind. Either `pdf` or `cdf`.
-        verbose : bool, optional
-            Verbosity flag.
+        out : 2-dimensional array of shape `(nbins_radial, nbins_neighbour)`
+            Output array to write to. Results are added to this array.
+        ndist : 2-dimensional array of shape `(nhalos, ncross_simulations)`
+            Distance of each halo to its nearest neighbour from a cross
+            simulation.
+        rdist : 1-dimensional array of shape `(nhalos, )`
+            Distance of each halo to the centre of the high-resolution region.
+
+        Returns
+        -------
+        out : 2-dimensional array of shape `(nbins_radial, nbins_neighbour)`
+        """
+        return count_neighbour(out, ndist, rdist, self.radial_bin_edges,
+                               self.rmax_neighbour, self.nbins_neighbour)
+
+    def build_dist(self, counts, kind):
+        """
+        Build the a PDF or a CDF for the nearest neighbour distribution from
+        binned counts as a function of radial distance from the centre of the
+        high-resolution region.
+
+        Parameters
+        ----------
+        counts : 2-dimensional array of shape `(nbins_radial, nbins_neighbour)`
+            Binned counts of the number of neighbours as a function of
+            radial distance.
 
         Returns
         -------
         dist : 2-dimensional array of shape `(nbins_radial, nbins_neighbour)`
         """
-        assert simname in ["csiborg", "quijote"]
         assert kind in ["pdf", "cdf"]
-        rbin_edges = self.radial_bin_edges
-        # We first bin the distances as a function of each reference halo
-        # radial distance and then its nearest neighbour distance.
-        fpaths = self.paths.cross_nearest(simname, run)
-        if simname == "quijote":
-            fpaths = fpaths
-        out = numpy.zeros((self.nbins_radial, self.nbins_neighbour),
-                          dtype=numpy.float32)
-        for fpath in tqdm(fpaths) if verbose else fpaths:
-            data = numpy.load(fpath)
-            out = count_neighbour(
-                out, data["ndist"], data["rdist"], rbin_edges,
-                self.rmax_neighbour, self.nbins_neighbour)
-
         if kind == "pdf":
             neighbour_bin_edges = self.neighbour_bin_edges
             dx = neighbour_bin_edges[1] - neighbour_bin_edges[0]
-            out /= numpy.sum(dx * out, axis=1).reshape(-1, 1)
+            counts /= numpy.sum(dx * counts, axis=1).reshape(-1, 1)
         else:
-            out = numpy.cumsum(out, axis=1, out=out)
-            out /= out[:, -1].reshape(-1, 1)
-        return out
+            x = self.bin_centres("neighbour")
+            counts = cumulative_trapezoid(counts, x, axis=1, initial=0)
+            counts /= counts[:, -1].reshape(-1, 1)
+        return counts
 
     def kl_divergence(self, simname, run, nsim, pdf, nobs=None, verbose=True):
         r"""

@@ -21,7 +21,7 @@ import numpy
 import healpy
 
 import scienceplots  # noqa
-import utils
+import plt_utils
 from cache_to_disk import cache_to_disk, delete_disk_caches_for_function  # noqa
 from tqdm import tqdm
 
@@ -35,7 +35,16 @@ except ModuleNotFoundError:
 
 def open_csiborg(nsim):
     """
-    Open a CSiBORG halo catalogue.
+    Open a CSiBORG halo catalogue. Applies mass and distance selection.
+
+    Parameters
+    ----------
+    nsim : int
+        Simulation index.
+
+    Returns
+    -------
+    cat : csiborgtools.read.HaloCatalogue
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     bounds = {"totpartmass": (None, None), "dist": (0, 155/0.705)}
@@ -43,6 +52,20 @@ def open_csiborg(nsim):
 
 
 def open_quijote(nsim, nobs=None):
+    """
+    Open a Quijote halo catalogue. Applies mass and distance selection.
+
+    Parameters
+    ----------
+    nsim : int
+        Simulation index.
+    nobs : int, optional
+        Fiducial observer index.
+
+    Returns
+    -------
+    cat : csiborgtools.read.QuijoteHaloCatalogue
+    """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     cat = csiborgtools.read.QuijoteHaloCatalogue(nsim, paths, nsnap=4)
     if nobs is not None:
@@ -51,10 +74,24 @@ def open_quijote(nsim, nobs=None):
 
 
 def plot_mass_vs_ncells(nsim, pdf=False):
+    """
+    Plot the halo mass vs. number of occupied cells in the initial snapshot.
+
+    Parameters
+    ----------
+    nsim : int
+        Simulation index.
+    pdf : bool, optional
+        Whether to save the figure as a PDF file.
+
+    Returns
+    -------
+    None
+    """
     cat = open_csiborg(nsim)
     mpart = 4.38304044e+09
 
-    with plt.style.context(utils.mplstyle):
+    with plt.style.context(plt_utils.mplstyle):
         plt.figure()
         plt.scatter(cat["totpartmass"], cat["lagpatch_ncells"], s=0.25,
                     rasterized=True)
@@ -66,9 +103,9 @@ def plot_mass_vs_ncells(nsim, pdf=False):
         plt.ylabel(r"$N_{\rm cells}$")
 
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
-            fout = join(utils.fout, f"init_mass_vs_ncells_{nsim}.{ext}")
+            fout = join(plt_utils.fout, f"init_mass_vs_ncells_{nsim}.{ext}")
             print(f"Saving to `{fout}`.")
-            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+            plt.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
         plt.close()
 
 
@@ -77,13 +114,19 @@ def plot_mass_vs_ncells(nsim, pdf=False):
 ###############################################################################
 
 
-def process_counts(counts):
-    mean = numpy.mean(counts, axis=0)
-    std = numpy.std(counts, axis=0)
-    return mean, std
-
-
 def plot_hmf(pdf=False):
+    """
+    Plot the (ultimate paretn) halo mass function of CSiBORG and Quijote.
+
+    Parameters
+    ----------
+    pdf : bool, optional
+        Whether to save the figure as a PDF file.
+
+    Returns
+    -------
+    None
+    """
     print("Plotting the HMF...", flush=True)
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
 
@@ -114,35 +157,39 @@ def plot_hmf(pdf=False):
     x = 10**(0.5 * (bins[1:] + bins[:-1]))
     # Edit lower limits
     csiborg_counts[:, x < 1e12] = numpy.nan
-    quijote_counts[:, x < 8e12] = numpy.nan
+    quijote_counts[:, x < 10**(12.4)] = numpy.nan
     # Edit upper limits
     csiborg_counts[:, x > 4e15] = numpy.nan
     quijote_counts[:, x > 4e15] = numpy.nan
 
-    with plt.style.context(utils.mplstyle):
+    with plt.style.context(plt_utils.mplstyle):
         cols = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         fig, ax = plt.subplots(nrows=2, sharex=True,
                                figsize=(3.5, 2.625 * 1.25),
                                gridspec_kw={"height_ratios": [1, 0.65]})
         fig.subplots_adjust(hspace=0, wspace=0)
 
-        mean_csiborg, std_csiborg = process_counts(csiborg_counts)
+        # Upper panel data
+        mean_csiborg = numpy.mean(csiborg_counts, axis=0)
+        std_csiborg = numpy.std(csiborg_counts, axis=0)
         ax[0].plot(x, mean_csiborg, label="CSiBORG")
         ax[0].fill_between(x, mean_csiborg - std_csiborg,
                            mean_csiborg + std_csiborg, alpha=0.5)
 
-        mean_quijote, std_quijote = process_counts(quijote_counts)
+        mean_quijote = numpy.mean(quijote_counts, axis=0)
+        std_quijote = numpy.std(quijote_counts, axis=0)
         ax[0].plot(x, mean_quijote, label="Quijote")
         ax[0].fill_between(x, mean_quijote - std_quijote,
                            mean_quijote + std_quijote, alpha=0.5)
-
+        # Lower panel data
         log_y = numpy.log10(mean_csiborg / mean_quijote)
         err = numpy.sqrt((std_csiborg / mean_csiborg / numpy.log(10))**2
                          + (std_quijote / mean_quijote / numpy.log(10))**2)
-
         ax[1].plot(x, 10**log_y, c=cols[2])
         ax[1].fill_between(x, 10**(log_y - err), 10**(log_y + err), alpha=0.5,
                            color=cols[2])
+
+        # Labels and accesories
         ax[1].axhline(1, color="k", ls=plt.rcParams["lines.linestyle"],
                       lw=0.5 * plt.rcParams["lines.linewidth"], zorder=0)
         ax[0].set_ylabel(r"$\frac{\mathrm{d} n}{\mathrm{d}\log M_{\rm h}}~\mathrm{dex}^{-1}$")  # noqa
@@ -156,14 +203,33 @@ def plot_hmf(pdf=False):
 
         fig.tight_layout(h_pad=0, w_pad=0)
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
-            fout = join(utils.fout, f"hmf_comparison.{ext}")
+            fout = join(plt_utils.fout, f"hmf_comparison.{ext}")
             print(f"Saving to `{fout}`.")
-            fig.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+            fig.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
         plt.close()
 
 
-@cache_to_disk(7)
 def load_field(kind, nsim, grid, MAS, in_rsp=False):
+    """
+    Load a single field.
+
+    Parameters
+    ----------
+    kind : str
+        Field kind.
+    nsim : int
+        Simulation index.
+    grid : int
+        Grid size.
+    MAS : str
+        Mass assignment scheme.
+    in_rsp : bool, optional
+        Whether to load the field in redshift space.
+
+    Returns
+    -------
+    field : n-dimensional array
+    """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=in_rsp))
 
@@ -175,6 +241,30 @@ def load_field(kind, nsim, grid, MAS, in_rsp=False):
 
 def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
                          highres_only=True, pdf=False):
+    """
+    Plot the mean projected field.
+
+    Parameters
+    ----------
+    kind : str
+        Field kind.
+    nsim : int
+        Simulation index.
+    grid : int
+        Grid size.
+    in_rsp : bool
+        Whether to load the field in redshift space.
+    MAS : str, optional
+        Mass assignment scheme.
+    highres_only : bool, optional
+        Whether to only plot the high-resolution region.
+    pdf : bool, optional
+        Whether to save the figure as a PDF.
+
+    Returns
+    -------
+    None
+    """
     print(f"Plotting projected field `{kind}`. ", flush=True)
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsnap = max(paths.get_snapshots(nsim))
@@ -190,14 +280,12 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
     if highres_only:
         csiborgtools.field.fill_outside(field, numpy.nan, rmax=155.5,
                                         boxsize=677.7)
-        # start = field.shape[0] // 4
         start = round(field.shape[0] * 0.27)
         end = round(field.shape[0] * 0.73)
-        # end = field.shape[0] - start
         field = field[start:end, start:end, start:end]
 
     labels = [r"$y-z$", r"$x-z$", r"$x-y$"]
-    with plt.style.context(utils.mplstyle):
+    with plt.style.context(plt_utils.mplstyle):
         fig, ax = plt.subplots(figsize=(3.5 * 2, 2.625), ncols=3, sharey=True,
                                sharex=True)
         fig.subplots_adjust(hspace=0, wspace=0)
@@ -216,9 +304,10 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
 
         fig.tight_layout(h_pad=0, w_pad=0)
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
-            fout = join(utils.fout, f"field_{kind}_{nsim}_rsp{in_rsp}.{ext}")
+            fout = join(plt_utils.fout,
+                        f"field_{kind}_{nsim}_rsp{in_rsp}.{ext}")
             print(f"Saving to `{fout}`.")
-            fig.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+            fig.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
         plt.close()
 
 ###############################################################################
@@ -227,6 +316,20 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
 
 
 def get_sky_label(kind, volume_weight):
+    """
+    Get the sky label for a given field kind.
+
+    Parameters
+    ----------
+    kind : str
+        Field kind.
+    volume_weight : bool
+        Whether to volume weight the field.
+
+    Returns
+    -------
+    label : str
+    """
     if volume_weight:
         if kind == "density":
             label = r"$\log \int_{0}^{R} r^2 \rho(r, \mathrm{RA}, \mathrm{dec}) \mathrm{d} r$"  # noqa
@@ -255,8 +358,38 @@ def get_sky_label(kind, volume_weight):
 def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
                           dmin=0, dmax=220, plot_halos=None,
                           volume_weight=True, pdf=False):
-    """
-    NOTE: add distance for groups.
+    r"""
+    Plot the sky distribution of a given field kind on the sky along with halos
+    and selected observations.
+
+    TODO
+    ----
+    - Add distance for groups.
+
+    Parameters
+    ----------
+    field : str
+        Field kind.
+    nsim : int
+        Simulation index.
+    grid : int
+        Grid size.
+    nside : int
+        Healpix nside of the sky projection.
+    MAS : str, optional
+        Mass assignment scheme.
+    plot_groups : bool, optional
+        Whether to plot the 2M++ groups.
+    dmin : float, optional
+        Minimum projection distance in :math:`\mathrm{Mpc}/h`.
+    dmax : float, optional
+        Maximum projection distance in :math:`\mathrm{Mpc}/h`.
+    plot_halos : list, optional
+        Minimum halo mass to plot in :math:`M_\odot`.
+    volume_weight : bool, optional
+        Whether to volume weight the field.
+    pdf : bool, optional
+        Whether to save the figure as a pdf.
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsnap = max(paths.get_snapshots(nsim))
@@ -274,7 +407,7 @@ def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
     out = csiborgtools.field.make_sky(field, angpos=angpos, dist=dist, box=box,
                                       volume_weight=volume_weight)
 
-    with plt.style.context(utils.mplstyle):
+    with plt.style.context(plt_utils.mplstyle):
         label = get_sky_label(kind, volume_weight)
         if kind in ["density", "overdensity"]:
             out = numpy.log10(out)
@@ -299,9 +432,9 @@ def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
             plt.legend(markerscale=10)
 
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
-            fout = join(utils.fout, f"sky_{kind}_{nsim}_from_{dmin}_to_{dmax}_vol{volume_weight}.{ext}")  # noqa
+            fout = join(plt_utils.fout, f"sky_{kind}_{nsim}_from_{dmin}_to_{dmax}_vol{volume_weight}.{ext}")  # noqa
             print(f"Saving to `{fout}`.")
-            plt.savefig(fout, dpi=utils.dpi, bbox_inches="tight")
+            plt.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
         plt.close()
 
 
@@ -321,12 +454,19 @@ if __name__ == "__main__":
             print(f"Cleaning cache for function {func}.")
             delete_disk_caches_for_function(func)
 
-    # plot_mass_vs_occupancy(7444)
-    # plot_mass_vs_normcells(7444 + 24 * 4, pdf=False)
-    # plot_mass_vs_ncells(7444, pdf=True)
-    # plot_hmf(pdf=True)
-    # plot_sky_distribution("radvel", 7444, 256, nside=64,
-    #                       plot_groups=False, dmin=50, dmax=100,
-    #                       plot_halos=5e13, volume_weight=False)
+    if False:
+        plot_mass_vs_ncells(7444, pdf=False)
 
-    plot_projected_field("potential", 7444, 256, in_rsp=True)
+    if False:
+        plot_hmf(pdf=False)
+
+    if False:
+        plot_sky_distribution("radvel", 7444, 256, nside=64,
+                              plot_groups=False, dmin=50, dmax=100,
+                              plot_halos=5e13, volume_weight=False)
+
+    if True:
+        plot_projected_field("overdensity", 7444, 1024, in_rsp=True,
+                             highres_only=False)
+        plot_projected_field("overdensity", 7444, 1024, in_rsp=False,
+                             highres_only=False)
