@@ -16,6 +16,7 @@
 from os.path import join
 from argparse import ArgumentParser
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy
 import healpy
@@ -209,8 +210,8 @@ def plot_hmf(pdf=False):
         plt.close()
 
 
-def load_field(kind, nsim, grid, MAS, in_rsp=False):
-    """
+def load_field(kind, nsim, grid, MAS, in_rsp=False, smooth_scale=None):
+    r"""
     Load a single field.
 
     Parameters
@@ -225,13 +226,16 @@ def load_field(kind, nsim, grid, MAS, in_rsp=False):
         Mass assignment scheme.
     in_rsp : bool, optional
         Whether to load the field in redshift space.
+    smooth_scale : float, optional
+        Smoothing scale in :math:`\mathrm{Mpc} / h`.
 
     Returns
     -------
     field : n-dimensional array
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=in_rsp))
+    return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=in_rsp,
+                                  smooth_scale=smooth_scale))
 
 
 ###############################################################################
@@ -239,9 +243,9 @@ def load_field(kind, nsim, grid, MAS, in_rsp=False):
 ###############################################################################
 
 
-def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
+def plot_projected_field(kind, nsim, grid, in_rsp, smooth_scale, MAS="PCS",
                          highres_only=True, slice_find=None, pdf=False):
-    """
+    r"""
     Plot the mean projected field, however can also plot a single slice.
 
     Parameters
@@ -254,6 +258,8 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
         Grid size.
     in_rsp : bool
         Whether to load the field in redshift space.
+    smooth_scale : float
+        Smoothing scale in :math:`\mathrm{Mpc} / h`.
     MAS : str, optional
         Mass assignment scheme.
     highres_only : bool, optional
@@ -273,11 +279,16 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
 
     if kind == "overdensity":
-        field = load_field("density", nsim, grid, MAS=MAS, in_rsp=in_rsp)
+        field = load_field("density", nsim, grid, MAS=MAS, in_rsp=in_rsp,
+                           smooth_scale=smooth_scale)
         density_gen = csiborgtools.field.DensityField(box, MAS)
-        field = density_gen.overdensity_field(field) + 2
+        field = density_gen.overdensity_field(field) + 1
     else:
-        field = load_field(kind, nsim, grid, MAS=MAS, in_rsp=in_rsp)
+        field = load_field(kind, nsim, grid, MAS=MAS, in_rsp=in_rsp,
+                           smooth_scale=smooth_scale)
+
+    if kind == "velocity":
+        field = field[0, ...]
 
     if highres_only:
         csiborgtools.field.fill_outside(field, numpy.nan, rmax=155.5,
@@ -286,10 +297,11 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
         end = round(field.shape[0] * 0.73)
         field = field[start:end, start:end, start:end]
 
-    if kind != "environment":
-        cmap = "viridis"
+    if kind == "environment":
+        cmap = mpl.colors.ListedColormap(
+            ['red', 'lightcoral', 'limegreen', 'khaki'])
     else:
-        cmap = "brg"
+        cmap = "viridis"
 
     labels = [r"$y-z$", r"$x-z$", r"$x-y$"]
     with plt.style.context(plt_utils.mplstyle):
@@ -309,12 +321,15 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
             else:
                 ax[i].imshow(img, vmin=vmin, vmax=vmax, cmap=cmap)
 
-            if not highres_only:
+            frad = 155.5 / 677.7
+            if not highres_only and 0.5 - frad < slice_find < 0.5 + frad:
                 theta = numpy.linspace(0, 2 * numpy.pi, 100)
-                rad = 155.5 / 677.7 * grid
+                z = (slice_find - 0.5) * grid
+                R = 155.5 / 677.7 * grid
+                rad = R * numpy.sqrt(1 - z**2 / R**2)
                 ax[i].plot(rad * numpy.cos(theta) + grid // 2,
                            rad * numpy.sin(theta) + grid // 2,
-                           lw=plt.rcParams["lines.linewidth"], zorder=1,
+                           lw=0.75 * plt.rcParams["lines.linewidth"], zorder=1,
                            c="red", ls="--")
             ax[i].set_title(labels[i])
 
@@ -343,17 +358,32 @@ def plot_projected_field(kind, nsim, grid, in_rsp, MAS="PCS",
                 (xticks * size / ncells - size / 2).astype(int))
             ax[i].set_xlabel(r"$x_j ~ [\mathrm{Mpc} / h]$")
 
-        cbar_ax = fig.add_axes([1.0, 0.1, 0.025, 0.8])
+        cbar_ax = fig.add_axes([0.982, 0.155, 0.025, 0.75],
+                               transform=ax[2].transAxes)
         if slice_find is None:
             clabel = "Mean projected field"
         else:
             clabel = "Sliced field"
-        fig.colorbar(im, cax=cbar_ax, label=clabel)
+
+        if kind == "environment":
+            bounds = [0, 1, 2, 3, 4]
+            norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+            cbar = fig.colorbar(
+                mpl.cm.ScalarMappable(cmap=cmap, norm=norm), cax=cbar_ax,
+                ticks=[0.5, 1.5, 2.5, 3.5])
+            cbar.ax.set_yticklabels(["knot", "filament", "sheet", "void"],
+                                    rotation=90, va="center")
+        else:
+            fig.colorbar(im, cax=cbar_ax, label=clabel)
 
         fig.tight_layout(h_pad=0, w_pad=0)
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
-            fout = join(plt_utils.fout,
-                        f"field_{kind}_{nsim}_rsp{in_rsp}.{ext}")
+            fout = join(
+                plt_utils.fout,
+                f"field_{kind}_{nsim}_rsp{in_rsp}_hres{highres_only}.{ext}")
+            if smooth_scale is not None and smooth_scale > 0:
+                smooth_scale = float(smooth_scale)
+                fout = fout.replace(f".{ext}", f"_smooth{smooth_scale}.{ext}")
             print(f"Saving to `{fout}`.")
             fig.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
         plt.close()
@@ -404,8 +434,8 @@ def get_sky_label(kind, volume_weight):
     return label
 
 
-def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
-                          dmin=0, dmax=220, plot_halos=None,
+def plot_sky_distribution(kind, nsim, grid, nside, smooth_scale, MAS="PCS",
+                          plot_groups=True, dmin=0, dmax=220, plot_halos=None,
                           volume_weight=True, pdf=False):
     r"""
     Plot the sky distribution of a given field kind on the sky along with halos
@@ -425,6 +455,8 @@ def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
         Grid size.
     nside : int
         Healpix nside of the sky projection.
+    smooth_scale : float
+        Smoothing scale in :math:`\mathrm{Mpc} / h`.
     MAS : str, optional
         Mass assignment scheme.
     plot_groups : bool, optional
@@ -445,11 +477,13 @@ def plot_sky_distribution(kind, nsim, grid, nside, MAS="PCS", plot_groups=True,
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
 
     if kind == "overdensity":
-        field = load_field("density", nsim, grid, MAS=MAS, in_rsp=False)
+        field = load_field("density", nsim, grid, MAS=MAS, in_rsp=False,
+                           smooth_scale=smooth_scale)
         density_gen = csiborgtools.field.DensityField(box, MAS)
-        field = density_gen.overdensity_field(field) + 2
+        field = density_gen.overdensity_field(field) + 1
     else:
-        field = load_field(kind, nsim, grid, MAS=MAS, in_rsp=False)
+        field = load_field(kind, nsim, grid, MAS=MAS, in_rsp=False,
+                           smooth_scale=smooth_scale)
 
     angpos = csiborgtools.field.nside2radec(nside)
     dist = numpy.linspace(dmin, dmax, 500)
@@ -519,7 +553,22 @@ if __name__ == "__main__":
     if True:
         kind = "environment"
         grid = 256
+        smooth_scale = 0
         # plot_projected_field("overdensity", 7444, grid, in_rsp=True,
         #                      highres_only=False)
         plot_projected_field(kind, 7444, grid, in_rsp=False,
-                             slice_find=0.5, highres_only=False)
+                             smooth_scale=smooth_scale, slice_find=0.5,
+                             highres_only=False)
+
+    if False:
+        paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+
+        d = csiborgtools.read.read_h5(paths.particles(7444))["particles"]
+
+        plt.figure()
+        plt.hist(d[:100000, 4], bins="auto")
+
+        plt.tight_layout()
+        plt.savefig("../plots/velocity_distribution.png", dpi=450,
+                    bbox_inches="tight")
+
