@@ -1,17 +1,26 @@
 from setuptools import find_packages, setup
 
 
-BUILD_REQ = ["numpy>=1.17.3", "scipy<1.9.0"]
+BUILD_REQ = ["numpy", "scipy"]
 INSTALL_REQ = BUILD_REQ
-INSTALL_REQ += ["scikit-learn>=1.1.0",
-                "jax[cpu]>=0.3.23",
-                "tqdm>=4.64.1",
-                "astropy>=5.1",
-                ],
+INSTALL_REQ += ["Corrfunc",
+                "Pylians",
+                "numba",
+                "tqdm",
+                "healpy",
+                "astropy",
+                "scikit-learn",
+                "h5py",
+                "matplotlib",
+                "scienceplots",
+                "mpi4py",
+                "pyyaml",
+                "joblib",]
+
 
 setup(
     name="csiborgtools",
-    version="0.1",
+    version="0.2",
     description="CSiBORG analysis tools",
     url="https://github.com/Richard-Sti/csiborgtools",
     author="Richard Stiskalek",
