@@ -38,18 +38,21 @@ class PairOverlap:
         Halo catalogue corresponding to the cross simulation.
     paths : py:class`csiborgtools.read.Paths`
         CSiBORG paths object.
+    maxdist : float, optional
+        Maximum halo distance in :math:`\mathrm{Mpc} / h` from the centre of
+        the high-resolution region. Removes overlaps of haloes outside it.
     """
     _cat0 = None
     _catx = None
     _data = None
 
-    def __init__(self, cat0, catx, paths):
+    def __init__(self, cat0, catx, paths, maxdist=None):
         self._cat0 = cat0
         self._catx = catx
-        self.load(cat0, catx, paths)
+        self.load(cat0, catx, paths, maxdist)
 
-    def load(self, cat0, catx, paths):
-        """
+    def load(self, cat0, catx, paths, maxdist=None):
+        r"""
         Load overlap calculation results. Matches the results back to the two
         catalogues in question.
 
@@ -61,6 +64,9 @@ class PairOverlap:
             Halo catalogue corresponding to the cross simulation.
         paths : py:class`csiborgtools.read.Paths`
             CSiBORG paths object.
+        maxdist : float, optional
+            Maximum halo distance in :math:`\mathrm{Mpc} / h` from the centre
+            of the high-resolution region.
 
         Returns
         -------
@@ -124,6 +130,14 @@ class PairOverlap:
         if to_invert:
             match_indxs, ngp_overlap, smoothed_overlap = self._invert_match(
                 match_indxs, ngp_overlap, smoothed_overlap, len(catx),)
+
+        if maxdist is not None:
+            dist = cat0.radial_distance(in_initial=False)
+            for i in range(len(cat0)):
+                if dist[i] > maxdist:
+                    match_indxs[i] = numpy.array([], dtype=int)
+                    ngp_overlap[i] = numpy.array([], dtype=float)
+                    smoothed_overlap[i] = numpy.array([], dtype=float)
 
         self._data = {"match_indxs": match_indxs,
                       "ngp_overlap": ngp_overlap,
@@ -228,7 +242,11 @@ class PairOverlap:
         summed_overlap : 1-dimensional array of shape `(nhalos, )`
         """
         overlap = self.overlap(from_smoothed)
-        return numpy.array([numpy.sum(cross)for cross in overlap])
+        out = numpy.full(len(overlap), numpy.nan, dtype=numpy.float32)
+        for i in range(len(overlap)):
+            if len(overlap[i]) > 0:
+                out[i] = numpy.sum(overlap[i])
+        return out
 
     def prob_nomatch(self, from_smoothed):
         """
@@ -246,8 +264,11 @@ class PairOverlap:
         prob_nomatch : 1-dimensional array of shape `(nhalos, )`
         """
         overlap = self.overlap(from_smoothed)
-        return numpy.array([numpy.product(numpy.subtract(1, cross))
-                            for cross in overlap])
+        out = numpy.full(len(overlap), numpy.nan, dtype=numpy.float32)
+        for i in range(len(overlap)):
+            if len(overlap[i]) > 0:
+                out[i] = numpy.product(numpy.subtract(1, overlap[i]))
+        return out
 
     def dist(self, in_initial, norm_kind=None):
         """
@@ -326,6 +347,35 @@ class PairOverlap:
                 ratio[i] = numpy.abs(ratio[i])
         return numpy.array(ratio, dtype=object)
 
+    def max_overlap_key(self, key, from_smoothed):
+        """
+        Calculate the maximum overlap mass of each halo in the reference
+        simulation from the cross simulation.
+
+        Parameters
+        ----------
+        key : str
+            Key to the maximum overlap statistic to calculate.
+        from_smoothed : bool
+            Whether to use the smoothed overlap or not.
+        mass_kind : str, optional
+            The mass kind whose ratio is to be calculated.
+
+        Returns
+        -------
+        out : 1-dimensional array of shape `(nhalos, )`
+        """
+        out = numpy.full(len(self), numpy.nan, dtype=numpy.float32)
+        y = self.catx(key)
+        overlap = self.overlap(from_smoothed)
+
+        for i, match_ind in enumerate(self["match_indxs"]):
+            # Skip if no match
+            if len(match_ind) == 0:
+                continue
+            out[i] = y[match_ind][numpy.argmax(overlap[i])]
+        return out
+
     def counterpart_mass(self, from_smoothed, overlap_threshold=0.,
                          in_log=False, mass_kind="totpartmass"):
         """
@@ -359,7 +409,7 @@ class PairOverlap:
 
         for i, match_ind in enumerate(self["match_indxs"]):
             # Skip if no match
-            if match_ind.size == 0:
+            if len(match_ind) == 0:
                 continue
 
             massx_ = massx[match_ind]  # Again just create references
@@ -526,6 +576,63 @@ class NPairsOverlap:
             pairs[i] = PairOverlap(cat0, catx, paths)
 
         self._pairs = pairs
+
+    def max_overlap(self, from_smoothed, verbose=True):
+        """
+        Calculate maximum overlap of each halo in the reference simulation with
+        the cross simulations.
+
+        Parameters
+        ----------
+        from_smoothed : bool
+            Whether to use the smoothed overlap or not.
+        verbose : bool, optional
+            Verbosity flag.
+
+        Returns
+        -------
+        max_overlap : 2-dimensional array of shape `(nhalos, ncatxs)`
+        """
+        out = [None] * len(self)
+        if verbose:
+            print("Calculating maximum overlap...", flush=True)
+
+        def get_max(y_):
+            if len(y_) == 0:
+                return numpy.nan
+            return numpy.max(y_)
+
+        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
+            out[i] = numpy.asanyarray([get_max(y_)
+                                       for y_ in pair.overlap(from_smoothed)])
+        return numpy.vstack(out).T
+
+    def max_overlap_key(self, key, from_smoothed, verbose=True):
+        """
+        Calculate maximum overlap mass of each halo in the reference
+        simulation with the cross simulations.
+
+        Parameters
+        ----------
+        key : str
+            Key to the maximum overlap statistic to calculate.
+        from_smoothed : bool
+            Whether to use the smoothed overlap or not.
+        verbose : bool, optional
+            Verbosity flag.
+
+        Returns
+        -------
+        out : 2-dimensional array of shape `(nhalos, ncatxs)`
+        """
+        out = [None] * len(self)
+        if verbose:
+            print(f"Calculating maximum overlap {key}...", flush=True)
+
+        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
+            out[i] = pair.max_overlap_key(key, from_smoothed)
+
+        return numpy.vstack(out).T
 
     def summed_overlap(self, from_smoothed, verbose=True):
         """

@@ -19,11 +19,12 @@ from os.path import join
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import numpy
 import scienceplots  # noqa
 from cache_to_disk import cache_to_disk, delete_disk_caches_for_function
 from scipy.stats import kendalltau
-from tqdm import tqdm
+from tqdm import trange, tqdm
 
 import plt_utils
 
@@ -57,6 +58,90 @@ def open_cat(nsim):
     return csiborgtools.read.HaloCatalogue(nsim, paths, bounds=bounds)
 
 
+def plot_mass_vs_pairoverlap(nsim0, nsimx):
+    """
+    Plot the pair overlap of a reference simulation with a single cross
+    simulation as a function of the reference halo mass.
+
+    Parameters
+    ----------
+    nsim0 : int
+        Reference simulation index.
+    nsimx : int
+        Cross simulation index.
+    """
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+    cat0 = open_cat(nsim0)
+    catx = open_cat(nsimx)
+    reader = csiborgtools.read.PairOverlap(cat0, catx, paths)
+
+    x = reader.copy_per_match("totpartmass")
+    y = reader.overlap(True)
+
+    x = numpy.log10(numpy.concatenate(x))
+    y = numpy.concatenate(y)
+
+    with plt.style.context(plt_utils.mplstyle):
+        plt.figure()
+        plt.hexbin(x, y, mincnt=1, bins="log",
+                   gridsize=50)
+        plt.colorbar(label="Counts in bins")
+        plt.xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        plt.ylabel("Pair overlap")
+        plt.ylim(0., 1.)
+
+        plt.tight_layout()
+        for ext in ["png"]:
+            fout = join(plt_utils.fout, f"mass_vs_pair_overlap{nsim0}.{ext}")
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
+def plot_mass_vs_maxpairoverlap(nsim0, nsimx):
+    """
+    Plot the maximum pair overlap of a reference simulation haloes with a
+    single cross simulation.
+
+    Parameters
+    ----------
+    nsim0 : int
+        Reference simulation index.
+    nsimx : int
+        Cross simulation index.
+    """
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+    cat0 = open_cat(nsim0)
+    catx = open_cat(nsimx)
+    reader = csiborgtools.read.PairOverlap(cat0, catx, paths)
+
+    x = numpy.log10(cat0["totpartmass"])
+    y = reader.overlap(True)
+
+    def get_max(y_):
+        if len(y_) == 0:
+            return numpy.nan
+        return numpy.max(y_)
+
+    y = numpy.array([get_max(y_) for y_ in y])
+
+    with plt.style.context(plt_utils.mplstyle):
+        plt.figure()
+        plt.hexbin(x, y, mincnt=1, bins="log",
+                   gridsize=50)
+        plt.colorbar(label="Counts in bins")
+        plt.xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        plt.ylabel("Maximum pair overlap")
+        plt.ylim(0., 1.)
+
+        plt.tight_layout()
+        for ext in ["png"]:
+            fout = join(plt_utils.fout, f"mass_vs_maxpairoverlap{nsim0}.{ext}")
+            print(f"Saving to `{fout}`.")
+            plt.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
 @cache_to_disk(7)
 def get_overlap(nsim0):
     """
@@ -74,9 +159,11 @@ def get_overlap(nsim0):
         Mass of halos in the reference simulation.
     hindxs : 1-dimensional array
         Halo indices in the reference simulation.
-    summed_overlap : 1-dimensional array
+    max_overlap : 2-dimensional array
+        Maximum overlap for each halo in the reference simulation.
+    summed_overlap : 2-dimensional array
         Summed overlap for each halo in the reference simulation.
-    prob_nomatch : 1-dimensional array
+    prob_nomatch : 2-dimensional array
         Probability of no match for each halo in the reference simulation.
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
@@ -93,8 +180,64 @@ def get_overlap(nsim0):
 
     hindxs = reader.cat0("index")
     summed_overlap = reader.summed_overlap(True)
+    max_overlap = reader.max_overlap(True)
     prob_nomatch = reader.prob_nomatch(True)
-    return mass, hindxs, summed_overlap, prob_nomatch
+    return mass, hindxs, max_overlap, summed_overlap, prob_nomatch
+
+
+def plot_mass_vsmedmaxoverlap(nsim0):
+    """
+    Plot the mean maximum overlap of a reference simulation haloes with all the
+    cross simulations.
+
+    Parameters
+    ----------
+    nsim0 : int
+        Reference simulation index.
+    """
+    x, __, max_overlap, __, __ = get_overlap(nsim0)
+
+    for i in trange(max_overlap.shape[0]):
+        if numpy.sum(numpy.isnan(max_overlap[i, :])) > 0:
+            max_overlap[i, :] = numpy.nan
+
+    x = numpy.log10(x)
+
+    with plt.style.context(plt_utils.mplstyle):
+        fig, axs = plt.subplots(ncols=3, figsize=(3.5 * 2, 2.625))
+        im1 = axs[0].hexbin(x, numpy.nanmean(max_overlap, axis=1), gridsize=30,
+                            mincnt=1, bins="log")
+
+        im2 = axs[1].hexbin(x, numpy.nanstd(max_overlap, axis=1), gridsize=30,
+                            mincnt=1, bins="log")
+        im3 = axs[2].hexbin(numpy.nanmean(max_overlap, axis=1),
+                            numpy.nanstd(max_overlap, axis=1), gridsize=30,
+                            C=x, reduce_C_function=numpy.nanmean)
+
+        axs[0].set_xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        axs[0].set_ylabel(r"Mean max. pair overlap")
+        axs[1].set_xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        axs[1].set_ylabel(r"Uncertainty of max. pair overlap")
+        axs[2].set_xlabel(r"Mean max. pair overlap")
+        axs[2].set_ylabel(r"Uncertainty of max. pair overlap")
+
+        label = ["Bin counts", "Bin counts", r"$\log M_{\rm tot} / M_\odot$"]
+        ims = [im1, im2, im3]
+        for i in range(3):
+            axins = inset_axes(axs[i], width="100%", height="5%",
+                               loc='upper center', borderpad=-0.75)
+            fig.colorbar(ims[i], cax=axins, orientation="horizontal",
+                         label=label[i])
+            axins.xaxis.tick_top()
+            axins.xaxis.set_tick_params(labeltop=True)
+            axins.xaxis.set_label_position("top")
+
+        fig.tight_layout()
+        for ext in ["png"]:
+            fout = join(plt_utils.fout, f"maxpairoverlap_{nsim0}.{ext}")
+            print(f"Saving to `{fout}`.")
+            fig.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
+        plt.close()
 
 
 def plot_summed_overlap_vs_mass(nsim0):
@@ -112,14 +255,19 @@ def plot_summed_overlap_vs_mass(nsim0):
     -------
     None
     """
-    x, __, summed_overlap, prob_nomatch = get_overlap(nsim0)
+    x, __, __, summed_overlap, prob_nomatch = get_overlap(nsim0)
     del __
     collect()
 
-    mean_overlap = numpy.mean(summed_overlap, axis=1)
-    std_overlap = numpy.std(summed_overlap, axis=1)
+    for i in trange(summed_overlap.shape[0]):
+        if numpy.sum(numpy.isnan(summed_overlap[i, :])) > 0:
+            summed_overlap[i, :] = numpy.nan
 
-    mean_prob_nomatch = numpy.mean(prob_nomatch, axis=1)
+    x = numpy.log10(x)
+
+    mean_overlap = numpy.nanmean(summed_overlap, axis=1)
+    std_overlap = numpy.nanstd(summed_overlap, axis=1)
+    mean_prob_nomatch = numpy.nanmean(prob_nomatch, axis=1)
 
     mask = mean_overlap > 0
     x = x[mask]
@@ -127,63 +275,45 @@ def plot_summed_overlap_vs_mass(nsim0):
     std_overlap = std_overlap[mask]
     mean_prob_nomatch = mean_prob_nomatch[mask]
 
-    # Mean summed overlap
     with plt.style.context(plt_utils.mplstyle):
-        plt.figure()
-        plt.hexbin(x, mean_overlap, mincnt=1, xscale="log", bins="log",
-                   gridsize=50)
-        plt.colorbar(label="Counts in bins")
-        plt.xlabel(r"$M_{\rm tot} / M_\odot$")
-        plt.ylabel(r"$\langle \mathcal{O}_{a}^{\mathcal{A} \mathcal{B}} \rangle_{\mathcal{B}}$")  # noqa
-        plt.ylim(0., 1.)
-
-        plt.tight_layout()
-        for ext in ["png", "pdf"]:
-            fout = join(plt_utils.fout, f"overlap_mean_{nsim0}.{ext}")
-            print(f"Saving to `{fout}`.")
-            plt.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
-        plt.close()
-
-    # Std summed overlap
-    with plt.style.context(plt_utils.mplstyle):
-        plt.figure()
-        plt.hexbin(x, std_overlap, mincnt=1, xscale="log", bins="log",
-                   gridsize=50)
-        plt.colorbar(label="Counts in bins")
-        plt.xlabel(r"$M_{\rm tot} / M_\odot$")
-        plt.ylabel(r"$\delta \left( \mathcal{O}_{a}^{\mathcal{A} \mathcal{B}} \right)_{\mathcal{B}}$")  # noqa
-        plt.ylim(0., 1.)
-        plt.tight_layout()
-
-        for ext in ["png", "pdf"]:
-            fout = join(plt_utils.fout, f"overlap_std_{nsim0}.{ext}")
-            print(f"Saving to `{fout}`.")
-            plt.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
-        plt.close()
-
-    # 1 - mean summed overlap vs mean prob nomatch
-    with plt.style.context(plt_utils.mplstyle):
-        plt.figure()
-        plt.scatter(1 - mean_overlap, mean_prob_nomatch, c=numpy.log10(x), s=2,
-                    rasterized=True)
-        plt.colorbar(label=r"$\log_{10} M_{\rm halo} / M_\odot$")
-
+        fig, axs = plt.subplots(ncols=3, figsize=(3.5 * 2, 2.625))
+        im1 = axs[0].hexbin(x, mean_overlap, mincnt=1, bins="log",
+                            gridsize=30)
+        im2 = axs[1].hexbin(x, std_overlap, mincnt=1, bins="log",
+                            gridsize=30)
+        im3 = axs[2].scatter(1 - mean_overlap, mean_prob_nomatch, c=x, s=2,
+                             rasterized=True)
         t = numpy.linspace(0.3, 1, 100)
-        plt.plot(t, t, color="red", linestyle="--")
+        axs[2].plot(t, t, color="red", linestyle="--")
+        axs[0].set_ylim(0.)
+        axs[1].set_ylim(0.)
+        axs[0].set_xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        axs[0].set_ylabel("Mean summed overlap")
+        axs[1].set_xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        axs[1].set_ylabel("Uncertainty of summed overlap")
+        axs[2].set_xlabel(r"$1 - $ mean summed overlap")
+        axs[2].set_ylabel("Mean prob. of no match")
 
-        plt.xlabel(r"$1 - \langle \mathcal{O}_a^{\mathcal{A} \mathcal{B}} \rangle_{\mathcal{B}}$")  # noqa
-        plt.ylabel(r"$\langle \eta_a^{\mathcal{A} \mathcal{B}} \rangle_{\mathcal{B}}$")  # noqa
-        plt.tight_layout()
+        label = ["Bin counts", "Bin counts", r"$\log M_{\rm tot} / M_\odot$"]
+        ims = [im1, im2, im3]
+        for i in range(3):
+            axins = inset_axes(axs[i], width="100%", height="5%",
+                               loc='upper center', borderpad=-0.75)
+            fig.colorbar(ims[i], cax=axins, orientation="horizontal",
+                         label=label[i])
+            axins.xaxis.tick_top()
+            axins.xaxis.set_tick_params(labeltop=True)
+            axins.xaxis.set_label_position("top")
 
-        for ext in ["png", "pdf"]:
-            fout = join(plt_utils.fout,
-                        f"overlap_vs_prob_nomatch_{nsim0}.{ext}")
+        fig.tight_layout()
+        for ext in ["png"]:
+            fout = join(plt_utils.fout, f"overlap_stat_{nsim0}.{ext}")
             print(f"Saving to `{fout}`.")
-            plt.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
+            fig.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
         plt.close()
 
 
-def plot_mass_vs_separation(nsim0, nsimx, min_overlap=0.0):
+def plot_mass_vs_separation(nsim0, nsimx, plot_std=False, min_overlap=0.0):
     """
     Plot the mass of a reference halo against the weighted separation of
     its counterparts.
@@ -194,6 +324,8 @@ def plot_mass_vs_separation(nsim0, nsimx, min_overlap=0.0):
         Reference simulation index.
     nsimx : int
         Cross simulation index.
+    plot_std : bool, optional
+        Whether to plot thestd instead of mean.
     min_overlap : float, optional
         Minimum overlap to consider.
 
@@ -205,7 +337,8 @@ def plot_mass_vs_separation(nsim0, nsimx, min_overlap=0.0):
     cat0 = open_cat(nsim0)
     catx = open_cat(nsimx)
 
-    reader = csiborgtools.read.PairOverlap(cat0, catx, paths)
+    reader = csiborgtools.read.PairOverlap(cat0, catx, paths,
+                                           maxdist=155 / 0.705)
     mass = numpy.log10(reader.cat0("totpartmass"))
     dist = reader.dist(in_initial=False, norm_kind="r200c")
     overlap = reader.overlap(True)
@@ -217,7 +350,11 @@ def plot_mass_vs_separation(nsim0, nsimx, min_overlap=0.0):
     dist = dist[mask, :]
     dist = numpy.log10(dist)
 
-    p = numpy.polyfit(mass, dist[:, 0], 1)
+    if not plot_std:
+        p = numpy.polyfit(mass, dist[:, 0], 1)
+    else:
+        p = numpy.polyfit(mass, dist[:, 1], 1)
+
     xrange = numpy.linspace(numpy.min(mass), numpy.max(mass), 1000)
     txt = r"$m = {}$, $c = {}$".format(*plt_utils.latex_float(*p, n=3))
 
@@ -225,7 +362,14 @@ def plot_mass_vs_separation(nsim0, nsimx, min_overlap=0.0):
         fig, ax = plt.subplots()
         ax.set_title(txt, fontsize="small")
 
-        cx = ax.hexbin(mass, dist[:, 0], mincnt=1, bins="log", gridsize=50)
+        if not plot_std:
+            cx = ax.hexbin(mass, dist[:, 0], mincnt=1, bins="log", gridsize=50)
+            ax.set_ylabel(r"$\log \langle \Delta R / R_{\rm 200c}\rangle$")
+        else:
+            cx = ax.hexbin(mass, dist[:, 1], mincnt=1, bins="log", gridsize=50)
+            ax.set_ylabel(
+                r"$\delta \log \langle \Delta R / R_{\rm 200c}\rangle$")
+
         ax.plot(xrange, numpy.polyval(p, xrange), color="red",
                 linestyle="--")
         fig.colorbar(cx, label="Bin counts")
@@ -234,7 +378,281 @@ def plot_mass_vs_separation(nsim0, nsimx, min_overlap=0.0):
 
         fig.tight_layout()
         for ext in ["png"]:
-            fout = join(plt_utils.fout, f"mass_vs_sep_{nsim0}_{nsimx}.{ext}")
+            fout = join(plt_utils.fout,
+                        f"mass_vs_sep_{nsim0}_{nsimx}_{min_overlap}.{ext}")
+            if plot_std:
+                fout = fout.replace(f".{ext}", f"_std.{ext}")
+            print(f"Saving to `{fout}`.")
+            fig.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
+@cache_to_disk(7)
+def get_max_key(nsim0, key):
+    """
+    Get the value of a maximum overlap halo's property.
+
+    Parameters
+    ----------
+    nsim0 : int
+        Reference simulation index.
+    key : str
+        Property to get.
+
+    Returns
+    -------
+    mass0 : 1-dimensional array
+        Mass of the reference haloes.
+    key_val : 1-dimensional array
+        Value of the property of the reference haloes.
+    max_overlap : 2-dimensional array
+        Maximum overlap of the reference haloes.
+    stat : 2-dimensional array
+        Value of the property of the maximum overlap halo.
+    """
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+    nsimxs = csiborgtools.read.get_cross_sims(nsim0, paths, smoothed=True)
+    nsimxs = nsimxs
+    cat0 = open_cat(nsim0)
+
+    catxs = []
+    print("Opening catalogues...", flush=True)
+    for nsimx in tqdm(nsimxs):
+        catxs.append(open_cat(nsimx))
+
+    reader = csiborgtools.read.NPairsOverlap(cat0, catxs, paths)
+
+    mass0 = reader.cat0("totpartmass")
+    key_val = reader.cat0(key)
+    max_overlap = reader.max_overlap(True)
+    stat = reader.max_overlap_key(key, True)
+    return mass0, key_val, max_overlap, stat
+
+
+def plot_maxoverlap_mass(nsim0):
+    """
+    Plot the mass of the reference haloes against the mass of the maximum
+    overlap haloes.
+
+    Parameters
+    ----------
+    nsim0 : int
+        Reference simulation index.
+    """
+    mass0, __, __, stat = get_max_key(nsim0, "totpartmass")
+
+    mu = numpy.mean(stat, axis=1)
+    std = numpy.std(numpy.log10(stat), axis=1)
+    mu = numpy.log10(mu)
+
+    mass0 = numpy.log10(mass0)
+    with plt.style.context(plt_utils.mplstyle):
+        fig, axs = plt.subplots(ncols=2, figsize=(3.5 * 1.75, 2.625))
+
+        im0 = axs[0].hexbin(mass0, mu, mincnt=1, bins="log", gridsize=50)
+        im1 = axs[1].hexbin(mass0, std, mincnt=1, bins="log", gridsize=50)
+
+        m = numpy.isfinite(mass0) & numpy.isfinite(mu)
+        print("True to expectation corr: ", kendalltau(mass0[m], mu[m]))
+
+        t = numpy.linspace(*numpy.percentile(mass0, [0, 100]), 1000)
+        axs[0].plot(t, t, color="red", linestyle="--")
+        axs[0].plot(t, t + 0.2, color="red", linestyle="--", alpha=0.5)
+        axs[0].plot(t, t - 0.2, color="red", linestyle="--", alpha=0.5)
+
+        axs[0].set_xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        axs[1].set_xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        axs[0].set_ylabel(r"Max. overlap mean of $\log M_{\rm tot} / M_\odot$")
+        axs[1].set_ylabel(r"Max. overlap std. of $\log M_{\rm tot} / M_\odot$")
+
+        ims = [im0, im1]
+        for i in range(2):
+            axins = inset_axes(axs[i], width="100%", height="5%",
+                               loc='upper center', borderpad=-0.75)
+            fig.colorbar(ims[i], cax=axins, orientation="horizontal",
+                         label="Bin counts")
+            axins.xaxis.tick_top()
+            axins.xaxis.set_tick_params(labeltop=True)
+            axins.xaxis.set_label_position("top")
+
+        fig.tight_layout()
+        for ext in ["png"]:
+            fout = join(plt_utils.fout,
+                        f"max_totpartmass_{nsim0}.{ext}")
+            print(f"Saving to `{fout}`.")
+            fig.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
+def plot_maxoverlapstat(nsim0, key):
+    """
+    Plot the mass of the reference haloes against the value of the maximum
+    overlap statistic.
+
+    Parameters
+    ----------
+    nsim0 : int
+        Reference simulation index.
+    key : str
+        Property to get.
+    """
+    assert key != "totpartmass"
+    mass0, key_val, __, stat = get_max_key(nsim0, key)
+
+    xlabels = {"lambda200c": r"\log \lambda_{\rm 200c}"}
+    key_label = xlabels.get(key, key)
+
+    mass0 = numpy.log10(mass0)
+    key_val = numpy.log10(key_val)
+
+    mu = numpy.mean(stat, axis=1)
+    std = numpy.std(numpy.log10(stat), axis=1)
+    mu = numpy.log10(mu)
+
+    with plt.style.context(plt_utils.mplstyle):
+        fig, axs = plt.subplots(ncols=3, figsize=(3.5 * 2, 2.625))
+
+        im0 = axs[0].hexbin(mass0, mu, mincnt=1, bins="log", gridsize=30)
+        im1 = axs[1].hexbin(mass0, std, mincnt=1, bins="log", gridsize=30)
+        im2 = axs[2].hexbin(key_val, mu, mincnt=1, bins="log", gridsize=30)
+        m = numpy.isfinite(key_val) & numpy.isfinite(mu)
+        print("True to expectation corr: ", kendalltau(key_val[m], mu[m]))
+
+        axs[0].set_xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        axs[0].set_ylabel(r"Max. overlap mean of ${}$".format(key_label))
+        axs[1].set_xlabel(r"$\log M_{\rm tot} / M_\odot$")
+        axs[1].set_ylabel(r"Max. overlap std. of ${}$".format(key_label))
+        axs[2].set_xlabel(r"${}$".format(key_label))
+        axs[2].set_ylabel(r"Max. overlap mean of ${}$".format(key_label))
+
+        ims = [im0, im1, im2]
+        for i in range(3):
+            axins = inset_axes(axs[i], width="100%", height="5%",
+                               loc='upper center', borderpad=-0.75)
+            fig.colorbar(ims[i], cax=axins, orientation="horizontal",
+                         label="Bin counts")
+            axins.xaxis.tick_top()
+            axins.xaxis.set_tick_params(labeltop=True)
+            axins.xaxis.set_label_position("top")
+
+        fig.tight_layout()
+        for ext in ["png"]:
+            fout = join(plt_utils.fout,
+                        f"max_{key}_{nsim0}.{ext}")
+            print(f"Saving to `{fout}`.")
+            fig.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
+        plt.close()
+
+
+@cache_to_disk(7)
+def get_expected_mass(nsim0, min_overlap):
+    """
+    Get the expected mass of a reference halo given its overlap with halos
+    from other simulations.
+
+    Parameters
+    ----------
+    nsim0 : int
+        Reference simulation index.
+    min_overlap : float
+        Minimum overlap to consider between a pair of haloes.
+
+    Returns
+    -------
+    mass : 1-dimensional array
+        Mass of the reference haloes.
+    mu : 1-dimensional array
+        Expected mass of the matched haloes.
+    std : 1-dimensional array
+        Standard deviation of the expected mass of the matched haloes.
+    prob_nomatch : 2-dimensional array
+        Probability of not matching the reference halo.
+    """
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+    nsimxs = csiborgtools.read.get_cross_sims(nsim0, paths, smoothed=True)
+    nsimxs = nsimxs
+    cat0 = open_cat(nsim0)
+
+    catxs = []
+    print("Opening catalogues...", flush=True)
+    for nsimx in tqdm(nsimxs):
+        catxs.append(open_cat(nsimx))
+
+    reader = csiborgtools.read.NPairsOverlap(cat0, catxs, paths)
+    mass = reader.cat0("totpartmass")
+
+    mu, std = reader.counterpart_mass(True, overlap_threshold=min_overlap,
+                                      in_log=False, return_full=False)
+    prob_nomatch = reader.prob_nomatch(True)
+    return mass, mu, std, prob_nomatch
+
+
+def plot_mass_vs_expected_mass(nsim0, min_overlap=0, max_prob_nomatch=1):
+    """
+    Plot the mass of a reference halo against the expected mass of its
+    counterparts.
+
+    Parameters
+    ----------
+    nsim0 : int
+        Reference simulation index.
+    min_overlap : float, optional
+        Minimum overlap between a pair of haloes to consider.
+    max_prob_nomatch : float, optional
+        Maximum probability of no match to consider.
+    """
+    mass, mu, std, prob_nomatch = get_expected_mass(nsim0, min_overlap)
+
+    std = std / mu / numpy.log(10)
+    mass = numpy.log10(mass)
+    mu = numpy.log10(mu)
+    prob_nomatch = numpy.nanmedian(prob_nomatch, axis=1)
+
+    # bins = numpy.arange(numpy.min(mass), numpy.max(mass), 0.2)
+    mask = numpy.isfinite(mass) & numpy.isfinite(mu)
+    mask &= (prob_nomatch < max_prob_nomatch)
+    # stat_x, stat_mu, stat_std = plt_utils.binned_trend(
+    #     mass[mask], mu[mask], 1 - prob_nomatch[mask], bins)
+
+    with plt.style.context(plt_utils.mplstyle):
+        fig, axs = plt.subplots(ncols=3, figsize=(3.5 * 2, 2.625))
+
+        im0 = axs[0].hexbin(mass[mask], mu[mask], mincnt=1, bins="log",
+                            gridsize=50,)
+        im1 = axs[1].hexbin(mass[mask], std[mask], mincnt=1, bins="log",
+                            gridsize=50)
+        im2 = axs[2].hexbin(1 - prob_nomatch[mask], mass[mask] - mu[mask],
+                            gridsize=50, C=mass[mask],
+                            reduce_C_function=numpy.nanmedian)
+        axs[2].axhline(0, color="red", linestyle="--", alpha=0.5)
+
+        axs[0].set_xlabel(r"True $\log M_{\rm tot} / M_\odot$")
+        axs[0].set_ylabel(r"Expected $\log M_{\rm tot} / M_\odot$")
+        axs[1].set_xlabel(r"True $\log M_{\rm tot} / M_\odot$")
+        axs[1].set_ylabel(r"Std. of $\sigma_{\log M_{\rm tot}}$")
+        axs[2].set_xlabel(r"1 - median prob. of no match")
+        axs[2].set_ylabel(r"$\log M_{\rm tot} - \log M_{\rm tot, exp}$")
+
+        t = numpy.linspace(*numpy.percentile(mass[mask], [0, 100]), 1000)
+        axs[0].plot(t, t, color="red", linestyle="--")
+        axs[0].plot(t, t + 0.2, color="red", linestyle="--", alpha=0.5)
+        axs[0].plot(t, t - 0.2, color="red", linestyle="--", alpha=0.5)
+
+        ims = [im0, im1, im2]
+        labels = ["Bin counts", "Bin counts", r"$\log M_{\rm tot}$"]
+        for i in range(3):
+            axins = inset_axes(axs[i], width="100%", height="5%",
+                               loc='upper center', borderpad=-0.75)
+            fig.colorbar(ims[i], cax=axins, orientation="horizontal",
+                         label=labels[i])
+            axins.xaxis.tick_top()
+            axins.xaxis.set_tick_params(labeltop=True)
+            axins.xaxis.set_label_position("top")
+
+        fig.tight_layout()
+        for ext in ["png"]:
+            fout = join(plt_utils.fout,
+                        f"mass_vs_expmass_{nsim0}_{max_prob_nomatch}.{ext}")
             print(f"Saving to `{fout}`.")
             fig.savefig(fout, dpi=plt_utils.dpi, bbox_inches="tight")
         plt.close()
@@ -714,7 +1132,7 @@ def plot_significance(simname, runs, nsim, nobs, kind, kwargs, runs_to_mass):
         plt.close()
 
 
-def make_binlims(run, runs_to_mass):
+def make_binlims(run, runs_to_mass, upper_threshold=None):
     """
     Make bin limits for the 1NN distance runs, corresponding to the first half
     of the log-mass bin.
@@ -725,13 +1143,18 @@ def make_binlims(run, runs_to_mass):
         Run name.
     runs_to_mass : dict
         Dictionary mapping run names to total halo mass range.
+    upper_threshold : float, optional
+        Bin width in dex. If set to `None`, the bin width is taken from the
+        `runs_to_mass` dictionary.
 
     Returns
     -------
     xmin, xmax : floats
     """
     xmin, xmax = runs_to_mass[run]
-    xmax = xmin + (xmax - xmin) / 2
+    if upper_threshold is not None:
+        xmax = xmin + upper_threshold
+
     xmin, xmax = 10**xmin, 10**xmax
     if run == "mass009":
         xmax = numpy.infty
@@ -782,9 +1205,9 @@ def plot_significance_vs_mass(simname, runs, nsim, nobs, kind, kwargs,
             else:
                 y = numpy.log10(make_ks(simname, run, nsim, nobs, kwargs))
 
-            xmin, xmax = make_binlims(run, runs_to_mass)
+            xmin, xmax = make_binlims(run, runs_to_mass, upper_threshold)
 
-            mask = (x >= xmin) & (x < xmax if upper_threshold else True)
+            mask = (x >= xmin) & (x < xmax)
             xs.append(numpy.log10(x[mask]))
             ys.append(y[mask])
 
@@ -922,7 +1345,7 @@ def plot_kl_vs_overlap(runs, nsim, kwargs, runs_to_mass, plot_std=True,
     for run in runs:
         nn_data = nn_reader.read_single("csiborg", run, nsim, nobs=None)
         nn_hindxs = nn_data["ref_hindxs"]
-        mass, overlap_hindxs, summed_overlap, prob_nomatch = get_overlap(nsim)
+        mass, overlap_hindxs, __, summed_overlap, prob_nomatch = get_overlap(nsim)  # noqa
 
         # We need to match the hindxs between the two.
         hind2overlap_array = {hind: i for i, hind in enumerate(overlap_hindxs)}
@@ -935,7 +1358,7 @@ def plot_kl_vs_overlap(runs, nsim, kwargs, runs_to_mass, plot_std=True,
         x = make_kl("csiborg", run, nsim, nobs=None, kwargs=kwargs)
         y1 = 1 - numpy.mean(prob_nomatch, axis=1)
         y2 = numpy.std(prob_nomatch, axis=1)
-        cmin, cmax = make_binlims(run, runs_to_mass)
+        cmin, cmax = make_binlims(run, runs_to_mass, upper_threshold)
         mask = (mass >= cmin) & (mass < cmax if upper_threshold else True)
         xs.append(x[mask])
         ys1.append(y1[mask])
@@ -957,7 +1380,7 @@ def plot_kl_vs_overlap(runs, nsim, kwargs, runs_to_mass, plot_std=True,
 
         plt.colorbar(label=r"$\log M_{\rm tot} / M_\odot$")
         plt.xlabel(r"$D_{\mathrm{KL}}$ of $r_{1\mathrm{NN}}$ distribution")
-        plt.ylabel(r"$1 - \langle \eta^{\mathcal{B}}_a \rangle_{\mathcal{B}}$")
+        plt.ylabel("1 - mean prob. of no match")
 
         plt.tight_layout()
         for ext in ["png"]:
@@ -1020,15 +1443,38 @@ if __name__ == "__main__":
         }
 
     # cached_funcs = ["get_overlap", "read_dist", "make_kl", "make_ks"]
-    cached_funcs = ["get_overlap"]
+    cached_funcs = ["get_max_key"]
     if args.clean:
         for func in cached_funcs:
             print(f"Cleaning cache for function {func}.")
             delete_disk_caches_for_function(func)
 
-    if True:
-        plot_mass_vs_separation(7444 + 24, 8956 + 24 * 3)
+    if False:
+        plot_mass_vs_pairoverlap(7444 + 24, 8956 + 24 * 3)
 
+    if False:
+        plot_mass_vs_maxpairoverlap(7444 + 24, 8956 + 24 * 3)
+
+    if False:
+        plot_mass_vsmedmaxoverlap(7444)
+
+    if False:
+        plot_summed_overlap_vs_mass(7444)
+
+    if True:
+        plot_mass_vs_separation(7444 + 24, 8956 + 24 * 3, min_overlap=0.0)
+
+    if False:
+        plot_maxoverlap_mass(7444)
+
+    if False:
+        plot_maxoverlapstat(7444, "lambda200c")
+
+    if False:
+        plot_maxoverlapstat(7444, "totpartmass")
+
+    if False:
+        plot_mass_vs_expected_mass(7444, max_prob_nomatch=1.0)
 
     # Plot 1NN distance distributions.
     if False:
@@ -1053,22 +1499,24 @@ if __name__ == "__main__":
                               runs_to_mass=runs_to_mass)
 
     if False:
+        # runs = [[f"mass00{i}"] for i in range(1, 10)]
+        runs = [[f"mass00{i}"] for i in [4]]
+        for runs_ in runs:
+            # runs = ["mass007"]
+            for kind in ["kl"]:
+                plot_significance_vs_mass("csiborg", runs_, 7444, nobs=None,
+                                          kind=kind, kwargs=neighbour_kwargs,
+                                          runs_to_mass=runs_to_mass,
+                                          upper_threshold=100)
+
+    if False:
+        # runs = [f"mass00{i}" for i in range(1, 10)]
+        runs = ["mass004"]
+        plot_kl_vs_ks("csiborg", runs, 7444, None, kwargs=neighbour_kwargs,
+                      runs_to_mass=runs_to_mass, upper_threshold=100)
+
+    if False:
         # runs = [f"mass00{i}" for i in range(1, 10)]
         runs = ["mass007"]
-        for kind in ["kl", "ks"]:
-            plot_significance_vs_mass("csiborg", runs, 7444, nobs=None,
-                                      kind=kind, kwargs=neighbour_kwargs,
-                                      runs_to_mass=runs_to_mass,
-                                      upper_threshold=True)
-
-    if False:
-        # runs = [f"mass00{i}" for i in range(1, 10)]
-        runs = ["mass006"]
-        plot_kl_vs_ks("csiborg", runs, 7444, None, kwargs=neighbour_kwargs,
-                      runs_to_mass=runs_to_mass, upper_threshold=True)
-
-    if False:
-        # runs = [f"mass00{i}" for i in range(1, 10)]
-        runs = ["mass006"]
         plot_kl_vs_overlap(runs, 7444, neighbour_kwargs, runs_to_mass,
-                           upper_threshold=True, plot_std=False)
+                           upper_threshold=100, plot_std=False)
