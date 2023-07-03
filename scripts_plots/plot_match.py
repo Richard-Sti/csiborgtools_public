@@ -608,11 +608,8 @@ def plot_mass_vs_expected_mass(nsim0, min_overlap=0, max_prob_nomatch=1):
     mu = numpy.log10(mu)
     prob_nomatch = numpy.nanmedian(prob_nomatch, axis=1)
 
-    # bins = numpy.arange(numpy.min(mass), numpy.max(mass), 0.2)
     mask = numpy.isfinite(mass) & numpy.isfinite(mu)
     mask &= (prob_nomatch < max_prob_nomatch)
-    # stat_x, stat_mu, stat_std = plt_utils.binned_trend(
-    #     mass[mask], mu[mask], 1 - prob_nomatch[mask], bins)
 
     with plt.style.context(plt_utils.mplstyle):
         fig, axs = plt.subplots(ncols=3, figsize=(3.5 * 2, 2.625))
