@@ -186,6 +186,42 @@ class Paths:
         """
         return join(self.borg_dir, "mcmc", f"mcmc_{nsim}.h5")
 
+    def fof_membership(self, nsim, sorted=False):
+        """
+        Path to the file containing the FoF particle membership.
+
+        Parameters
+        ----------
+        nsim : int
+            IC realisation index.
+        sorted : bool, optional
+            Whether to return path to the file that is sorted in the same
+            order as the PHEW output.
+        """
+        fdir = join(self.postdir, "FoF_membership", )
+        if not isdir(fdir):
+            mkdir(fdir)
+            warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
+        fout = join(fdir, f"fof_membership_{nsim}.npy")
+        if sorted:
+            fout = fout.replace(".npy", "_sorted.npy")
+        return fout
+
+    def fof_cat(self, nsim):
+        """
+        Path to the FoF halo catalogue file.
+
+        Parameters
+        ----------
+        nsim : int
+            IC realisation index.
+        """
+        fdir = join(self.postdir, "FoF_membership", )
+        if not isdir(fdir):
+            mkdir(fdir)
+            warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
+        return join(fdir, f"halo_catalog_{nsim}_FOF.txt")
+
     def mmain(self, nsnap, nsim):
         """
         Path to the `mmain` CSiBORG files of summed substructure.
@@ -246,7 +282,7 @@ class Paths:
         -------
         ids : 1-dimensional array
         """
-        assert simname in ["csiborg", "quijote"]
+        assert simname in ["csiborg", "quijote", "quijote_full"]
         if simname == "csiborg":
             files = glob(join(self.srcdir, "ramses_out*"))
             files = [f.split("/")[-1] for f in files]      # Only file names
@@ -260,6 +296,7 @@ class Paths:
                 pass
             return numpy.sort(ids)
         else:
+            # TODO here later read this from the catalogues instead.
             return numpy.arange(100, dtype=int)
 
     def ic_path(self, nsim, tonew=False):
@@ -323,7 +360,7 @@ class Paths:
         simpath = self.ic_path(nsim, tonew=tonew)
         return join(simpath, f"output_{str(nsnap).zfill(5)}")
 
-    def structfit(self, nsnap, nsim, kind):
+    def structfit(self, nsnap, nsim):
         """
         Path to the clump or halo catalogue from `fit_halos.py`. Only CSiBORG
         is supported.
@@ -334,19 +371,16 @@ class Paths:
             Snapshot index.
         nsim : int
             IC realisation index.
-        kind : str
-            Type of catalogue.  Can be either `clumps` or `halos`.
 
         Returns
         -------
         path : str
         """
-        assert kind in ["clumps", "halos"]
         fdir = join(self.postdir, "structfit")
         if not isdir(fdir):
             mkdir(fdir)
             warn(f"Created directory `{fdir}`.", UserWarning, stacklevel=1)
-        fname = f"{kind}_out_{str(nsim).zfill(5)}_{str(nsnap).zfill(5)}.npy"
+        fname = f"out_{str(nsim).zfill(5)}_{str(nsnap).zfill(5)}.npy"
         return join(fdir, fname)
 
     def overlap(self, nsim0, nsimx, smoothed):
@@ -441,7 +475,7 @@ class Paths:
         Parameters
         ----------
         simname : str
-            Simulation name. Must be `csiborg` or `quijote`.
+            Simulation name. Must be `csiborg`, `quijote` or `quijote_full`.
         nsim : int
             IC realisation index.
 

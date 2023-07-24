@@ -32,7 +32,7 @@ from .utils import cols_to_structured
 
 class ParticleReader:
     """
-    Shortcut to read in particle files along with their corresponding clumps.
+    Object to read in particle files along with their corresponding haloes.
 
     Parameters
     ----------
@@ -203,7 +203,7 @@ class ParticleReader:
         nsim : int
             IC realisation index.
         pars_extract : list of str
-            Parameters to be extacted.
+            Parameters to be extracted.
         return_structured : bool, optional
             Whether to return a structured array or a 2-dimensional array. If
             the latter, then the order of the columns is the same as the order
@@ -280,7 +280,7 @@ class ParticleReader:
 
     def open_unbinding(self, nsnap, nsim, cpu):
         """
-        Open particle files to a given CSiBORG simulation. Note that to be
+        Open particle files of a given CSiBORG simulation. Note that to be
         consistent CPU is incremented by 1.
 
         Parameters
@@ -305,7 +305,8 @@ class ParticleReader:
 
     def read_clumpid(self, nsnap, nsim, verbose=True):
         """
-        Read clump IDs of particles from unbinding files.
+        Read PHEW clump IDs of particles from unbinding files. This halo finder
+        was used when running the catalogue.
 
         Parameters
         ----------
@@ -332,14 +333,13 @@ class ParticleReader:
             j = nparts[cpu]
             ff = self.open_unbinding(nsnap, nsim, cpu)
             clumpid[i:i + j] = ff.read_ints()
-
             ff.close()
 
         return clumpid
 
     def read_clumps(self, nsnap, nsim, cols=None):
         """
-        Read in a clump file `clump_xxXXX.dat`.
+        Read in a PHEW clump file `clump_xxXXX.dat`.
 
         Parameters
         ----------
@@ -385,6 +385,54 @@ class ParticleReader:
         out = cols_to_structured(data.shape[0], dtype)
         for col in cols:
             out[col] = data[:, clump_cols[col][0]]
+        return out
+
+    def read_fof_hids(self, nsim):
+        """
+        Read in the FoF particle halo membership IDs that are sorted to match
+        the PHEW output.
+
+        Parameters
+        ----------
+        nsim : int
+            IC realisation index.
+
+        Returns
+        -------
+        hids : 1-dimensional array
+            Halo IDs of particles.
+        """
+        return numpy.load(self.paths.fof_membership(nsim, sorted=True))
+
+    def read_fof_halos(self, nsim):
+        """
+        Read in the FoF halo catalogue.
+
+        Parameters
+        ----------
+        nsim : int
+            IC realisation index.
+
+        Returns
+        -------
+        cat : structured array
+        """
+        fpath = self.paths.fof_cat(nsim)
+        hid = numpy.genfromtxt(fpath, usecols=0, dtype=numpy.int32)
+        pos = numpy.genfromtxt(fpath, usecols=(1, 2, 3), dtype=numpy.float32)
+        totmass = numpy.genfromtxt(fpath, usecols=4, dtype=numpy.float32)
+        m200c = numpy.genfromtxt(fpath, usecols=5, dtype=numpy.float32)
+
+        dtype = {"names": ["index", "x", "y", "z", "fof_totpartmass",
+                           "fof_m200c"],
+                 "formats": [numpy.int32] + [numpy.float32] * 5}
+        out = numpy.full(hid.size, numpy.nan, dtype=dtype)
+        out["index"] = hid
+        out["x"] = pos[:, 0]
+        out["y"] = pos[:, 1]
+        out["z"] = pos[:, 2]
+        out["fof_totpartmass"] = totmass * 1e11
+        out["fof_m200c"] = m200c * 1e11
         return out
 
 
@@ -457,7 +505,7 @@ class MmainReader:
         """
         Make the summed substructure catalogue for a final snapshot. Includes
         the position of the parent, the summed mass and the fraction of mass in
-        substructure.
+        substructure. Corresponds to the PHEW Halo finder.
 
         Parameters
         ----------
@@ -552,39 +600,10 @@ def halfwidth_mask(pos, hw):
     return numpy.all((0.5 - hw < pos) & (pos < 0.5 + hw), axis=1)
 
 
-def load_clump_particles(clid, particles, clump_map, clid2map):
+def load_halo_particles(hid, particles, halo_map, hid2map):
     """
-    Load a clump's particles from a particle array. If it is not there, i.e
-    clump has no associated particles, return `None`.
-
-    Parameters
-    ----------
-    clid : int
-        Clump ID.
-    particles : 2-dimensional array
-        Array of particles.
-    clump_map : 2-dimensional array
-        Array containing start and end indices in the particle array
-        corresponding to each clump.
-    clid2map : dict
-        Dictionary mapping clump IDs to `clump_map` array positions.
-
-    Returns
-    -------
-    clump_particles : 2-dimensional array
-        Particle array of this clump.
-    """
-    try:
-        k0, kf = clump_map[clid2map[clid], 1:]
-        return particles[k0:kf + 1, :]
-    except KeyError:
-        return None
-
-
-def load_parent_particles(hid, particles, clump_map, clid2map, clumps_cat):
-    """
-    Load a parent halo's particles from a particle array. If it is not there,
-    return `None`.
+    Load a halo's particles from a particle array. If it is not there, i.e
+    halo has no associated particles, return `None`.
 
     Parameters
     ----------
@@ -592,27 +611,19 @@ def load_parent_particles(hid, particles, clump_map, clid2map, clumps_cat):
         Halo ID.
     particles : 2-dimensional array
         Array of particles.
-    clump_map : 2-dimensional array
+    halo_map : 2-dimensional array
         Array containing start and end indices in the particle array
-        corresponding to each clump.
-    clid2map : dict
-        Dictionary mapping clump IDs to `clump_map` array positions.
-    clumps_cat : :py:class:`csiborgtools.read.ClumpsCatalogue`
-        Clumps catalogue.
+        corresponding to each halo.
+    hid2map : dict
+        Dictionary mapping halo IDs to `halo_map` array positions.
 
     Returns
     -------
-    halo : 2-dimensional array
+    halo_particles : 2-dimensional array
         Particle array of this halo.
     """
-    clids = clumps_cat["index"][clumps_cat["parent"] == hid]
-    # We first load the particles of each clump belonging to this parent
-    # and then concatenate them for further analysis.
-    clumps = []
-    for clid in clids:
-        parts = load_clump_particles(clid, particles, clump_map, clid2map)
-        if parts is not None:
-            clumps.append(parts)
-    if len(clumps) == 0:
+    try:
+        k0, kf = halo_map[hid2map[hid], 1:]
+        return particles[k0:kf + 1, :]
+    except KeyError:
         return None
-    return numpy.concatenate(clumps)

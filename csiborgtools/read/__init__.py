@@ -13,8 +13,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 from .box_units import CSiBORGBox, QuijoteBox  # noqa
-from .halo_cat import (ClumpsCatalogue, HaloCatalogue,  # noqa
-                       QuijoteHaloCatalogue, fiducial_observers)
+from .halo_cat import (CSiBORGHaloCatalogue, QuijoteHaloCatalogue, fiducial_observers)  # noqa
 from .knn_summary import kNNCDFReader  # noqa
 from .nearest_neighbour_summary import NearestNeighbourReader  # noqa
 from .obs import (SDSS, MCXCClusters, PlanckClusters, TwoMPPGalaxies,  # noqa
@@ -25,8 +24,8 @@ from .overlap_summary import (NPairsOverlap, PairOverlap,  # noqa
 from .paths import Paths  # noqa
 from .pk_summary import PKReader  # noqa
 from .readsim import (MmainReader, ParticleReader, halfwidth_mask,  # noqa
-                      load_clump_particles, load_parent_particles, read_initcm)
+                      load_halo_particles, read_initcm)  # noqa
 from .tpcf_summary import TPCFReader  # noqa
 from .utils import (M200_to_R200, cartesian_to_radec,  # noqa
                     cols_to_structured, radec_to_cartesian, read_h5,
-                    real2redshift)
+                    real2redshift)  # noqa
