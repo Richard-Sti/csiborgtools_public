@@ -94,17 +94,13 @@ if __name__ == "__main__":
     parser.add_argument("--nsims", type=int, nargs="+", default=None,
                         help="Indices of simulations to cross. If `-1` processes all simulations.")  # noqa
     parser.add_argument("--Rmax", type=float, default=155/0.705,
-                        help="High-resolution region radius")
+                        help="High-resolution region radius. Ignored for `quijote_full`.")  # noqa
     parser.add_argument("--bw", type=float, default=0.2,
-                        help="Bin width in dex")
+                        help="Bin width in dex.")
     parser.add_argument("--verbose", type=lambda x: bool(strtobool(x)),
-                        default=False)
-
+                        default=False, help="Verbosity flag.")
     parser_args = parser.parse_args()
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    nproc = comm.Get_size()
-    verbose = nproc == 1
+
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsims = get_nsims(parser_args, paths)
     bins = numpy.arange(11., 16., parser_args.bw, dtype=numpy.float32)
@@ -112,4 +108,4 @@ if __name__ == "__main__":
     def do_work(nsim):
         get_counts(nsim, bins, paths, parser_args)
 
-    work_delegation(do_work, nsims, comm, master_verbose=parser_args.verbose)
+    work_delegation(do_work, nsims, MPI.COMM_WORLD)

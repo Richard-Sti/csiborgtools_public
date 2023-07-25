@@ -60,9 +60,9 @@ if __name__ == "__main__":
     parser.add_argument("--nsims", type=int, nargs="+", default=None,
                         help="Indices of simulations to cross. If `-1` processes all simulations.")  # noqa
     parser.add_argument("--Rmax", type=float, default=155/0.705,
-                        help="High-resolution region radius")  # noqa
+                        help="High-resolution region radius.")
     parser.add_argument("--verbose", type=lambda x: bool(strtobool(x)),
-                        default=False)
+                        default=False, help="Verbosity flag.")
     args = parser.parse_args()
 
     with open("./cluster_tpcf_auto.yml", "r") as file:
@@ -79,8 +79,4 @@ if __name__ == "__main__":
         return do_auto(args, config, cats, nsim, paths)
 
     nsims = list(cats.keys())
-    work_delegation(do_work, nsims, comm, master_verbose=args.verbose)
-
-    comm.Barrier()
-    if comm.Get_rank() == 0:
-        print(f"{datetime.now()}: all finished. Quitting.")
+    work_delegation(do_work, nsims, comm)
