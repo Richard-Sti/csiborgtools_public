@@ -58,9 +58,10 @@ def density_field(nsim, parser_args, to_save=True):
     field : 3-dimensional array
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsnap = max(paths.get_snapshots(nsim))
+    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
-    parts = csiborgtools.read.read_h5(paths.particles(nsim))["particles"]
+    parts = csiborgtools.read.read_h5(paths.particles(nsim, "csiborg"))
+    parts = parts["particles"]
     gen = csiborgtools.field.DensityField(box, parser_args.MAS)
 
     if parser_args.kind == "density":
@@ -114,9 +115,10 @@ def velocity_field(nsim, parser_args, to_save=True):
             "Smoothed velocity field is not implemented.")
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     mpart = 1.1641532e-10  # Particle mass in CSiBORG simulations.
-    nsnap = max(paths.get_snapshots(nsim))
+    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
-    parts = csiborgtools.read.read_h5(paths.particles(nsim))["particles"]
+    parts = csiborgtools.read.read_h5(paths.particles(nsim, "csiborg"))
+    parts = parts["particles"]
 
     gen = csiborgtools.field.VelocityField(box, parser_args.MAS)
     field = gen(parts, parser_args.grid, mpart, verbose=parser_args.verbose)
@@ -152,7 +154,7 @@ def potential_field(nsim, parser_args, to_save=True):
     potential : 3-dimensional array
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsnap = max(paths.get_snapshots(nsim))
+    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
 
     # Load the real space overdensity field
@@ -168,7 +170,8 @@ def potential_field(nsim, parser_args, to_save=True):
     field = gen(rho)
 
     if parser_args.in_rsp:
-        parts = csiborgtools.read.read_h5(paths.particles(nsim))["particles"]
+        parts = csiborgtools.read.read_h5(paths.particles(nsim, "csiborg"))
+        parts = parts["particles"]
         field = csiborgtools.field.field2rsp(*field, parts=parts, box=box,
                                              verbose=parser_args.verbose)
     if to_save:
@@ -207,7 +210,7 @@ def radvel_field(nsim, parser_args, to_save=True):
         raise NotImplementedError(
             "Smoothed radial vel. field not implemented.")
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsnap = max(paths.get_snapshots(nsim))
+    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
 
     vel = numpy.load(paths.field("velocity", parser_args.MAS, parser_args.grid,
@@ -245,7 +248,7 @@ def environment_field(nsim, parser_args, to_save=True):
     env : 3-dimensional array
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsnap = max(paths.get_snapshots(nsim))
+    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
     density_gen = csiborgtools.field.DensityField(box, parser_args.MAS)
     gen = csiborgtools.field.TidalTensorField(box, parser_args.MAS)
@@ -268,7 +271,8 @@ def environment_field(nsim, parser_args, to_save=True):
 
     # Optionally drag the field to RSP.
     if parser_args.in_rsp:
-        parts = csiborgtools.read.read_h5(paths.particles(nsim))["particles"]
+        parts = csiborgtools.read.read_h5(paths.particles(nsim, "csiborg"))
+        parts = parts["particles"]
         fields = (tensor_field.T00, tensor_field.T11, tensor_field.T22,
                   tensor_field.T01, tensor_field.T02, tensor_field.T12)
 

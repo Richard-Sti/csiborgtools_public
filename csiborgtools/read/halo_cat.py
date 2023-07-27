@@ -22,7 +22,6 @@ from copy import deepcopy
 from functools import lru_cache
 from itertools import product
 from math import floor
-from os.path import join
 
 import numpy
 from readfof import FoF_catalog
@@ -30,14 +29,14 @@ from sklearn.neighbors import NearestNeighbors
 
 from .box_units import CSiBORGBox, QuijoteBox
 from .paths import Paths
-from .readsim import ParticleReader
+from .readsim import CSiBORGReader
 from .utils import (add_columns, cartesian_to_radec, cols_to_structured,
                     flip_cols, radec_to_cartesian, real2redshift)
 
 
 class BaseCatalogue(ABC):
     """
-    Base (sub)halo catalogue.
+    Base halo catalogue.
     """
     _data = None
     _paths = None
@@ -125,11 +124,8 @@ class BaseCatalogue(ABC):
 
     def position(self, in_initial=False, cartesian=True):
         r"""
-        Position components. If Cartesian, then in :math:`\mathrm{cMpc}`. If
-        spherical, then radius is in :math:`\mathrm{cMpc}`, RA in
-        :math:`[0, 360)` degrees and DEC in :math:`[-90, 90]` degrees. Note
-        that the position is defined as the minimum of the gravitationl
-        potential.
+        Position components. If not Cartesian, then RA is in :math:`[0, 360)`
+        degrees and DEC is in :math:`[-90, 90]` degrees.
 
         Parameters
         ----------
@@ -399,33 +395,33 @@ class CSiBORGHaloCatalogue(BaseCatalogue):
         names and the items are a len-2 tuple of (min, max) values. In case of
         no minimum or maximum, use `None`. For radial distance from the origin
         use `dist`.
-    with_lagpatch : bool, optional
-        Whether to only load halos with a resolved Lagrangian patch.
     load_fitted : bool, optional
         Whether to load fitted quantities.
     load_initial : bool, optional
         Whether to load initial positions.
+    with_lagpatch : bool, optional
+        Whether to only load halos with a resolved Lagrangian patch.
     rawdata : bool, optional
         Whether to return the raw data. In this case applies no cuts and
         transformations.
     """
 
     def __init__(self, nsim, paths, bounds={"dist": (0, 155.5 / 0.705)},
-                 with_lagpatch=True, load_fitted=True, load_initial=True,
+                 load_fitted=True, load_initial=True, with_lagpatch=True,
                  rawdata=False):
         self.nsim = nsim
         self.paths = paths
-        reader = ParticleReader(paths)
+        reader = CSiBORGReader(paths)
         self._data = reader.read_fof_halos(self.nsim)
 
         if load_fitted:
-            fits = numpy.load(paths.structfit(self.nsnap, nsim))
+            fits = numpy.load(paths.structfit(self.nsnap, nsim, "csiborg"))
             cols = [col for col in fits.dtype.names if col != "index"]
             X = [fits[col] for col in cols]
             self._data = add_columns(self._data, X, cols)
 
         if load_initial:
-            fits = numpy.load(paths.initmatch(nsim, "fit"))
+            fits = numpy.load(paths.initmatch(nsim, "csiborg", "fit"))
             X, cols = [], []
             for col in fits.dtype.names:
                 if col == "index":
@@ -465,7 +461,7 @@ class CSiBORGHaloCatalogue(BaseCatalogue):
 
     @property
     def nsnap(self):
-        return max(self.paths.get_snapshots(self.nsim))
+        return max(self.paths.get_snapshots(self.nsim, "csiborg"))
 
     @property
     def box(self):
@@ -497,28 +493,35 @@ class QuijoteHaloCatalogue(BaseCatalogue):
     nsnap : int
         Snapshot index.
     origin : len-3 tuple, optional
-        Where to place the origin of the box. By default the centre of the box.
-        In units of :math:`cMpc`.
+        Where to place the origin of the box. In units of :math:`cMpc / h`.
     bounds : dict
         Parameter bounds to apply to the catalogue. The keys are the parameter
         names and the items are a len-2 tuple of (min, max) values. In case of
         no minimum or maximum, use `None`. For radial distance from the origin
         use `dist`.
+    load_initial : bool, optional
+        Whether to load initial positions.
+    with_lagpatch : bool, optional
+        Whether to only load halos with a resolved Lagrangian patch.
+    rawdata : bool, optional
+        Whether to return the raw data. In this case applies no cuts and
+        transformations.
     **kwargs : dict
         Keyword arguments for backward compatibility.
     """
     _nsnap = None
     _origin = None
 
-    def __init__(self, nsim, paths, nsnap,
-                 origin=[500 / 0.6711, 500 / 0.6711, 500 / 0.6711],
-                 bounds=None, **kwargs):
+    def __init__(self, nsim, paths, nsnap, origin=[0., 0., 0.],
+                 bounds=None, load_initial=True, with_lagpatch=True,
+                 rawdata=False, **kwargs):
         self.paths = paths
         self.nsnap = nsnap
         self.origin = origin
-        self._boxwidth = 1000 / 0.6711
+        self._box = QuijoteBox(nsnap, nsim, paths)
+        self._boxwidth = self.box.boxsize
 
-        fpath = join(self.paths.quijote_dir, "halos", str(nsim))
+        fpath = self.paths.fof_cat(nsim, "quijote")
         fof = FoF_catalog(fpath, self.nsnap, long_ids=False, swap=False,
                           SFR=False, read_IDs=False)
 
@@ -529,18 +532,44 @@ class QuijoteHaloCatalogue(BaseCatalogue):
                 ("index", numpy.int32)]
         data = cols_to_structured(fof.GroupLen.size, cols)
 
-        pos = fof.GroupPos / 1e3 / self.box.h
+        pos = self.box.mpc2box(fof.GroupPos / 1e3)
         vel = fof.GroupVel * (1 + self.redshift)
         for i, p in enumerate(["x", "y", "z"]):
             data[p] = pos[:, i] - self.origin[i]
             data["v" + p] = vel[:, i]
-        data["group_mass"] = fof.GroupMass * 1e10 / self.box.h
+        data["group_mass"] = self.box.solarmass2box(fof.GroupMass * 1e10)
         data["npart"] = fof.GroupLen
-        data["index"] = numpy.arange(data.size, dtype=numpy.int32)
+        # We want to start indexing from 1. Index 0 is reserved for
+        # particles unassigned to any FoF group.
+        data["index"] = 1 + numpy.arange(data.size, dtype=numpy.int32)
+
+        if load_initial:
+            fits = numpy.load(paths.initmatch(nsim, "quijote", "fit"))
+            X, cols = [], []
+            for col in fits.dtype.names:
+                if col == "index":
+                    continue
+                if col in ['x', 'y', 'z']:
+                    cols.append(col + "0")
+                else:
+                    cols.append(col)
+                X.append(fits[col])
+            data = add_columns(data, X, cols)
 
         self._data = data
-        if bounds is not None:
-            self.apply_bounds(bounds)
+        if not rawdata:
+            if with_lagpatch:
+                mask = numpy.isfinite(self._data["lagpatch_size"])
+                self._data = self._data[mask]
+
+                names = ["x", "y", "z", "group_mass"]
+                self._data = self.box.convert_from_box(self._data, names)
+                if load_initial:
+                    names = ["x0", "y0", "z0", "lagpatch_size"]
+                    self._data = self.box.convert_from_box(self._data, names)
+
+            if bounds is not None:
+                self.apply_bounds(bounds)
 
     @property
     def nsnap(self):
@@ -579,7 +608,7 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         -------
         box : instance of :py:class:`csiborgtools.units.BaseBox`
         """
-        return QuijoteBox(self.nsnap)
+        return self._box
 
     @property
     def origin(self):
@@ -628,6 +657,7 @@ class QuijoteHaloCatalogue(BaseCatalogue):
 
         cat.apply_bounds({"dist": (0, rmax)})
         return cat
+
 
 ###############################################################################
 #                     Utility functions for halo catalogues                   #

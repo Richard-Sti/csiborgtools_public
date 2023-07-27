@@ -51,7 +51,7 @@ MAS = "CIC"  # mass asignment scheme
 
 paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
 box = csiborgtools.read.CSiBORGBox(paths)
-reader = csiborgtools.read.ParticleReader(paths)
+reader = csiborgtools.read.CSiBORGReader(paths)
 ics = paths.get_ics("csiborg")
 nsims = len(ics)
 
@@ -66,8 +66,8 @@ jobs = csiborgtools.utils.split_jobs(nsims, nproc)[rank]
 for n in jobs:
     print(f"Rank {rank} at {datetime.now()}: saving {n}th delta.", flush=True)
     nsim = ics[n]
-    particles = reader.read_particle(max(paths.get_snapshots(nsim)), nsim,
-                                     ["x", "y", "z", "M"], verbose=False)
+    particles = reader.read_particle(max(paths.get_snapshots(nsim, "csiborg")),
+                                     nsim, ["x", "y", "z", "M"], verbose=False)
     # Halfwidth -- particle selection
     if args.halfwidth < 0.5:
         particles = csiborgtools.read.halfwidth_select(

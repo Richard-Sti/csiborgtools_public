@@ -30,12 +30,15 @@ except ModuleNotFoundError:
 
 
 def pair_match(nsim0, nsimx, sigma, smoothen, verbose):
+    # TODO fix this.
+    simname = "csiborg"
+    overlapper_kwargs = {"box_size": 512, "bckg_halfsize": 475}
     from csiborgtools.read import CSiBORGHaloCatalogue, read_h5
 
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     smooth_kwargs = {"sigma": sigma, "mode": "constant", "cval": 0.0}
-    overlapper = csiborgtools.match.ParticleOverlap()
-    matcher = csiborgtools.match.RealisationsMatcher()
+    overlapper = csiborgtools.match.ParticleOverlap(**overlapper_kwargs)
+    matcher = csiborgtools.match.RealisationsMatcher(**overlapper_kwargs)
 
     # Load the raw catalogues (i.e. no selection) including the initial CM
     # positions and the particle archives.
@@ -45,12 +48,12 @@ def pair_match(nsim0, nsimx, sigma, smoothen, verbose):
     catx = CSiBORGHaloCatalogue(nsimx, paths, load_initial=True, bounds=bounds,
                                 with_lagpatch=True, load_clumps_cat=True)
 
-    clumpmap0 = read_h5(paths.particles(nsim0))["clumpmap"]
-    parts0 = read_h5(paths.initmatch(nsim0, "particles"))["particles"]
+    clumpmap0 = read_h5(paths.particles(nsim0, simname))["clumpmap"]
+    parts0 = read_h5(paths.initmatch(nsim0, simname, "particles"))["particles"]
     clid2map0 = {clid: i for i, clid in enumerate(clumpmap0[:, 0])}
 
-    clumpmapx = read_h5(paths.particles(nsimx))["clumpmap"]
-    partsx = read_h5(paths.initmatch(nsimx, "particles"))["particles"]
+    clumpmapx = read_h5(paths.particles(nsimx, simname))["clumpmap"]
+    partsx = read_h5(paths.initmatch(nsimx, simname, "particles"))["particles"]
     clid2mapx = {clid: i for i, clid in enumerate(clumpmapx[:, 0])}
 
     # We generate the background density fields. Loads halos's particles one by

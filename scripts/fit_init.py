@@ -50,9 +50,6 @@ def _main(nsim, simname, verbose):
     verbose : bool
         Verbosity flag.
     """
-    if simname == "quijote":
-        raise NotImplementedError("Quijote not implemented yet.")
-
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     cols = [("index", numpy.int32),
             ("x", numpy.float32),
@@ -61,14 +58,25 @@ def _main(nsim, simname, verbose):
             ("lagpatch_size", numpy.float32),
             ("lagpatch_ncells", numpy.int32),]
 
-    parts = csiborgtools.read.read_h5(paths.initmatch(nsim, "particles"))
+    fname = paths.initmatch(nsim, simname, "particles")
+    parts = csiborgtools.read.read_h5(fname)
     parts = parts['particles']
-    halo_map = csiborgtools.read.read_h5(paths.particles(nsim))
+    halo_map = csiborgtools.read.read_h5(paths.particles(nsim, simname))
     halo_map = halo_map["halomap"]
 
-    cat = csiborgtools.read.CSiBORGHaloCatalogue(
-        nsim, paths, rawdata=True, load_fitted=False, load_initial=False)
+    if simname == "csiborg":
+        cat = csiborgtools.read.CSiBORGHaloCatalogue(
+            nsim, paths, rawdata=True, load_fitted=False, load_initial=False)
+    else:
+        cat = csiborgtools.read.QuijoteHaloCatalogue(nsim, paths, nsnap=4)
     hid2map = {hid: i for i, hid in enumerate(halo_map[:, 0])}
+
+    # Initialise the overlapper.
+    if simname == "csiborg":
+        kwargs = {"box_size": 2048, "bckg_halfsize": 475}
+    else:
+        kwargs = {"box_size": 512, "bckg_halfsize": 256}
+    overlapper = csiborgtools.match.ParticleOverlap(**kwargs)
 
     out = csiborgtools.read.cols_to_structured(len(cat), cols)
     for i, hid in enumerate(tqdm(cat["index"]) if verbose else cat["index"]):
@@ -88,12 +96,11 @@ def _main(nsim, simname, verbose):
         out["lagpatch_size"][i] = numpy.percentile(distances, 99)
 
         # Calculate the number of cells with > 0 density.
-        overlapper = csiborgtools.match.ParticleOverlap()
         delta = overlapper.make_delta(pos, mass, subbox=True)
         out["lagpatch_ncells"][i] = csiborgtools.fits.delta2ncells(delta)
 
     # Now save it
-    fout = paths.initmatch(nsim, "fit")
+    fout = paths.initmatch(nsim, simname, "fit")
     if verbose:
         print(f"{datetime.now()}: dumping fits to .. `{fout}`.", flush=True)
     with open(fout, "wb") as f:

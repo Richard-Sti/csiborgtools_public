@@ -60,6 +60,11 @@ def minmax_halo(hid, halo_ids, start_loop=0):
     return start, end
 
 
+###############################################################################
+#                           Sorting and dumping                               #
+###############################################################################
+
+
 def main(nsim, simname, verbose):
     """
     Read in the snapshot particles, sort them by their FoF halo ID and dump
@@ -81,20 +86,21 @@ def main(nsim, simname, verbose):
     None
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    partreader = csiborgtools.read.ParticleReader(paths)
+    if simname == "csiborg":
+        partreader = csiborgtools.read.CSiBORGReader(paths)
+    else:
+        partreader = csiborgtools.read.QuijoteReader(paths)
 
-    if simname == "quijote":
-        raise NotImplementedError("Not implemented for Quijote yet.")
-
-    # Keep "ID" as the last column!
-    pars_extract = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'M', "ID"]
-    nsnap = max(paths.get_snapshots(nsim))
-    fname = paths.particles(nsim)
+    nsnap = max(paths.get_snapshots(nsim, simname))
+    fname = paths.particles(nsim, simname)
     # We first read in the halo IDs of the particles and infer the sorting.
     # Right away we dump the halo IDs to a HDF5 file and clear up memory.
     if verbose:
-        print(f"{datetime.now()}: loading particles {nsim}.", flush=True)
-    part_hids = partreader.read_fof_hids(nsim)
+        print(f"{datetime.now()}: loading PIDs of IC {nsim}.", flush=True)
+    part_hids = partreader.read_fof_hids(
+        nsnap=nsnap, nsim=nsim, verbose=verbose)
+    if verbose:
+        print(f"{datetime.now()}: sorting PIDs of IC {nsim}.", flush=True)
     sort_indxs = numpy.argsort(part_hids).astype(numpy.int32)
     part_hids = part_hids[sort_indxs]
     with h5py.File(fname, "w") as f:
@@ -106,6 +112,10 @@ def main(nsim, simname, verbose):
     # Next we read in the particles and sort them by their halo ID.
     # We cannot directly read this as an unstructured array because the float32
     # precision is insufficient to capture the halo IDs.
+    if simname == "csiborg":
+        pars_extract = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'M', "ID"]
+    else:
+        pars_extract = None
     parts, pids = partreader.read_particle(
         nsnap, nsim, pars_extract, return_structured=False, verbose=verbose)
     # Now we in two steps save the particles and particle IDs.
@@ -129,11 +139,11 @@ def main(nsim, simname, verbose):
     collect()
 
     if verbose:
-        print(f"{datetime.now()}: creating halo map for {nsim}.", flush=True)
+        print(f"{datetime.now()}: creating a halo map for {nsim}.", flush=True)
     # Load clump IDs back to memory
     with h5py.File(fname, "r") as f:
         part_hids = f["halo_ids"][:]
-    # We loop over the unique clump IDs.
+    # We loop over the unique halo IDs.
     unique_halo_ids = numpy.unique(part_hids)
     halo_map = numpy.full((unique_halo_ids.size, 3), numpy.nan,
                           dtype=numpy.int32)
@@ -148,7 +158,7 @@ def main(nsim, simname, verbose):
         start_loop = kf
 
     # We save the mapping to a HDF5 file
-    with h5py.File(paths.particles(nsim), "r+") as f:
+    with h5py.File(fname, "r+") as f:
         f.create_dataset("halomap", data=halo_map)
         f.close()
 
