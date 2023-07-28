@@ -49,8 +49,10 @@ def open_csiborg(nsim):
     cat : csiborgtools.read.CSiBORGHaloCatalogue
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    bounds = {"totpartmass": (None, None), "dist": (0, 155/0.705)}
-    return csiborgtools.read.CSiBORGHaloCatalogue(nsim, paths, bounds=bounds)
+    bounds = {"totpartmass": (None, None), "dist": (0, 155)}
+    return csiborgtools.read.CSiBORGHaloCatalogue(
+        nsim, paths, bounds=bounds, load_fitted=True, load_initial=True,
+        with_lagpatch=False)
 
 
 def open_quijote(nsim, nobs=None):
@@ -69,9 +71,11 @@ def open_quijote(nsim, nobs=None):
     cat : csiborgtools.read.QuijoteHaloCatalogue
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    cat = csiborgtools.read.QuijoteHaloCatalogue(nsim, paths, nsnap=4)
+    cat = csiborgtools.read.QuijoteHaloCatalogue(
+        nsim, paths, nsnap=4, load_fitted=True, load_initial=True,
+        with_lagpatch=False)
     if nobs is not None:
-        cat = cat.pick_fiducial_observer(nobs, rmax=155.5 / 0.705)
+        cat = cat.pick_fiducial_observer(nobs, rmax=155.5)
     return cat
 
 
@@ -101,7 +105,7 @@ def plot_mass_vs_ncells(nsim, pdf=False):
         plt.yscale("log")
         for n in [1, 10, 100]:
             plt.axvline(n * 512 * mpart, c="black", ls="--", zorder=0, lw=0.8)
-        plt.xlabel(r"$M_{\rm tot} / M_\odot$")
+        plt.xlabel(r"$M_{\rm tot} ~ [M_\odot$ / h]")
         plt.ylabel(r"$N_{\rm cells}$")
 
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
@@ -198,7 +202,7 @@ def plot_hmf(pdf=False):
         ax[1].axhline(1, color="k", ls=plt.rcParams["lines.linestyle"],
                       lw=0.5 * plt.rcParams["lines.linewidth"], zorder=0)
         ax[0].set_ylabel(r"$\frac{\mathrm{d} n}{\mathrm{d}\log M_{\rm h}}~\mathrm{dex}^{-1}$")  # noqa
-        ax[1].set_xlabel(r"$M_{\rm h}$ [$M_\odot$]")
+        ax[1].set_xlabel(r"$M_{\rm h}~[M_\odot / h]$")
         ax[1].set_ylabel(r"$\mathrm{CSiBORG} / \mathrm{Quijote}$")
 
         ax[0].set_xscale("log")
@@ -268,7 +272,7 @@ def plot_hmf_quijote_full(pdf=False):
                       lw=0.5 * plt.rcParams["lines.linewidth"], zorder=0)
         ax[0].set_ylabel(r"$\frac{\mathrm{d}^2 n}{\mathrm{d}\log M_{\rm h} \mathrm{d} V}~[\mathrm{dex}^{-1} (\mathrm{Mpc / h})^{-3}]$",  # noqa
                          fontsize="small")
-        ax[1].set_xlabel(r"$M_{\rm h}$ [$M_\odot$]")
+        ax[1].set_xlabel(r"$M_{\rm h}~[$M_\odot / h]$", fontsize="small")
         ax[1].set_ylabel(r"$\mathrm{HMF} / \langle \mathrm{HMF} \rangle$",
                          fontsize="small")
 

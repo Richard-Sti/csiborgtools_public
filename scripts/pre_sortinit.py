@@ -12,9 +12,13 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-"""
+r"""
 Script to sort the initial snapshot particles according to their final
 snapshot ordering, which is sorted by the halo IDs.
+
+Ensures the following units:
+    - Positions in box units.
+    - Masses in :math:`M_\odot / h`.
 """
 from argparse import ArgumentParser
 from datetime import datetime
@@ -75,6 +79,13 @@ def _main(nsim, simname, verbose):
         nsnap = -1
     part0, pid0 = partreader.read_particle(
         nsnap, nsim, pars_extract, return_structured=False, verbose=verbose)
+
+    # In CSiBORG we need to convert particle masses from box units.
+    if simname == "csiborg":
+        box = csiborgtools.read.CSiBORGBox(
+            max(paths.get_snapshots(nsim, simname)), nsim, paths)
+        part0[:, 3] = box.box2solarmass(part0[:, 3])
+
     # Quijote's initial snapshot information also contains velocities but we
     # don't need those.
     if simname == "quijote":

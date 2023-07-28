@@ -11,11 +11,16 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-"""
+r"""
 Script to load in the simulation particles, sort them by their FoF halo ID and
 dump into a HDF5 file. Stores the first and last index of each halo in the
 particle array. This can be used for fast slicing of the array to acces
 particles of a single clump.
+
+Ensures the following units:
+    - Positions in box units.
+    - Velocities in :math:`\mathrm{km} / \mathrm{s}`.
+    - Masses in :math:`M_\odot / h`.
 """
 from argparse import ArgumentParser
 from datetime import datetime
@@ -118,6 +123,14 @@ def main(nsim, simname, verbose):
         pars_extract = None
     parts, pids = partreader.read_particle(
         nsnap, nsim, pars_extract, return_structured=False, verbose=verbose)
+
+    # In case of CSiBORG, we need to convert the mass and velocities from
+    # box units.
+    if simname == "csiborg":
+        box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
+        parts[:, [3, 4, 5]] = box.box2vel(parts[:, [3, 4, 5]])
+        parts[:, 6] = box.box2solarmass(parts[:, 6])
+
     # Now we in two steps save the particles and particle IDs.
     if verbose:
         print(f"{datetime.now()}: dumping particles from {nsim}.", flush=True)

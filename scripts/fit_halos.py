@@ -99,12 +99,12 @@ def _main(nsim, simname, verbose):
     if simname == "csiborg":
         box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
         cat = csiborgtools.read.CSiBORGHaloCatalogue(
-            nsim, paths, with_lagpatch=False, load_initial=False, rawdata=True,
-            load_fitted=False)
+            nsim, paths, bounds=None, load_fitted=False, load_initial=False)
     else:
         box = csiborgtools.read.QuijoteBox(nsnap, nsim, paths)
         cat = csiborgtools.read.QuijoteHaloCatalogue(
-            nsim, paths, nsnap, load_initial=False, rawdata=True)
+            nsim, paths, nsnap, bounds=None, load_fitted=False,
+            load_initial=False)
 
     # Particle archive
     f = csiborgtools.read.read_h5(paths.particles(nsim, simname))
@@ -116,6 +116,7 @@ def _main(nsim, simname, verbose):
     for i in trange(len(cat)) if verbose else range(len(cat)):
         hid = cat["index"][i]
         out["index"][i] = hid
+        # print("i = ", i)
         part = csiborgtools.read.load_halo_particles(hid, particles, halo_map,
                                                      hid2map)
         # Skip if no particles.
