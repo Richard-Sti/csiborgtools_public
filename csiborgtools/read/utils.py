@@ -81,7 +81,7 @@ def radec_to_cartesian(X, isdeg=True):
 
 
 def real2redshift(pos, vel, observer_location, box, periodic_wrap=True,
-                  make_copy=True):
+                  subtract_observer=False, make_copy=True):
     r"""
     Convert real-space position to redshift space position.
 
@@ -98,6 +98,9 @@ def real2redshift(pos, vel, observer_location, box, periodic_wrap=True,
     periodic_wrap : bool, optional
         Whether to wrap around the box, particles may be outside the default
         bounds once RSD is applied.
+    subtract_observer : bool, optional
+        If True, subtract the observer's location from the returned
+        positions.
     make_copy : bool, optional
         Whether to make a copy of `pos` before modifying it.
 
@@ -116,8 +119,10 @@ def real2redshift(pos, vel, observer_location, box, periodic_wrap=True,
     # Compute the norm squared of the displacement
     norm2 = numpy.sum(pos**2, axis=1)
     pos *= (1 + box._aexp / box.H0 * vr_dot / norm2).reshape(-1, 1)
+
     # Place the observer back at the original location
-    pos += observer_location
+    if not subtract_observer:
+        pos += observer_location
 
     if periodic_wrap:
         boxsize = box.box2mpc(1.)

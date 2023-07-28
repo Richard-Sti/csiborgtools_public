@@ -288,7 +288,7 @@ class BaseCatalogue(ABC):
         """
         return numpy.vstack([self["v{}".format(p)] for p in ("x", "y", "z")]).T
 
-    def redshift_space_position(self, cartesian=True):
+    def redshift_space_position(self, cartesian=True, subtract_observer=False):
         """
         Calculates the position of objects in redshift space. Positions can be
         returned  in either Cartesian coordinates (default) or spherical
@@ -299,12 +299,17 @@ class BaseCatalogue(ABC):
         cartesian : bool, optional
             Returns position in Cartesian coordinates if True, else in
             spherical coordinates.
+        subtract_observer : bool, optional
+            If True, subtract the observer's location from the returned
+            positions.
 
         Returns
         -------
         pos : 2-dimensional array of shape `(nobjects, 3)`
             Position of objects in the desired coordinate system.
         """
+        # Force subtraction of observer if not in Cartesian coordinates
+        subtract_observer = subtract_observer or not cartesian
         rsp = real2redshift(self.position(cartesian=True), self.velocity(),
                             self.observer_location, self.box, make_copy=False)
         return rsp if cartesian else cartesian_to_radec(rsp)
@@ -417,8 +422,8 @@ class BaseCatalogue(ABC):
 
         # Get positions of haloes in this catalogue
         if in_rsp:
-            # TODO what to do with subtracting the observer here?
-            pos = self.redshift_space_position(cartesian=True)
+            pos = self.redshift_space_position(cartesian=True,
+                                               subtract_observer=True)
         else:
             pos = self.position(in_initial=False, cartesian=True,
                                 subtract_observer=True)
