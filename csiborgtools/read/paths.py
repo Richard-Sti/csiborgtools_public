@@ -314,6 +314,8 @@ class Paths:
             files = glob(
                 "/mnt/extraspace/rstiskalek/Quijote/Snapshots_fiducial/*")
             files = [int(f.split("/")[-1]) for f in files]
+            warn("Taking only the snapshots that also have a FoF catalogue!")
+            files = [f for f in files if f < 100]
         else:
             raise ValueError(f"Unknown simulation name `{simname}`.")
 
