@@ -14,7 +14,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """CSiBORG paths manager."""
 from glob import glob
-from os import makedirs, mkdir
+from os import makedirs
 from os.path import isdir, join
 from warnings import warn
 
