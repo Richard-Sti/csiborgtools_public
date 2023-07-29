@@ -305,9 +305,9 @@ class Paths:
             files = [f for f in files if "_inv" not in f]  # Remove inv. ICs
             files = [f for f in files if "_new" not in f]  # Remove _new
             files = [f for f in files if "OLD" not in f]   # Remove _old
-            ids = [int(f.split("_")[-1]) for f in files]
+            files = [int(f.split("_")[-1]) for f in files]
             try:
-                ids.remove(5511)
+                files.remove(5511)
             except ValueError:
                 pass
         elif simname == "quijote" or simname == "quijote_full":
