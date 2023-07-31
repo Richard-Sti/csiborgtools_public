@@ -58,7 +58,8 @@ class BaseCatalogue(ABC):
 
     @nsim.setter
     def nsim(self, nsim):
-        assert isinstance(nsim, int)
+        if not isinstance(nsim, (int, numpy.integer)):
+            raise TypeError("`nsim` must be an integer!")
         self._nsim = nsim
 
     @abstractproperty
@@ -614,9 +615,9 @@ class QuijoteHaloCatalogue(BaseCatalogue):
                           SFR=False, read_IDs=False)
 
         cols = [("x", numpy.float32), ("y", numpy.float32),
-                ("z", numpy.float32), ("vx", numpy.float32),
-                ("vy", numpy.float32), ("vz", numpy.float32),
-                ("group_mass", numpy.float32), ("npart", numpy.int32),
+                ("z", numpy.float32), ("fof_vx", numpy.float32),
+                ("fof_vy", numpy.float32), ("fof_vz", numpy.float32),
+                ("group_mass", numpy.float32), ("fof_npart", numpy.int32),
                 ("index", numpy.int32)]
         data = cols_to_structured(fof.GroupLen.size, cols)
 
@@ -624,9 +625,9 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         vel = fof.GroupVel * (1 + self.redshift)
         for i, p in enumerate(["x", "y", "z"]):
             data[p] = pos[:, i]
-            data["v" + p] = vel[:, i]
+            data["fof_v" + p] = vel[:, i]
         data["group_mass"] = fof.GroupMass * 1e10
-        data["npart"] = fof.GroupLen
+        data["fof_npart"] = fof.GroupLen
         # We want to start indexing from 1. Index 0 is reserved for
         # particles unassigned to any FoF group.
         data["index"] = 1 + numpy.arange(data.size, dtype=numpy.int32)
@@ -634,7 +635,7 @@ class QuijoteHaloCatalogue(BaseCatalogue):
         if load_initial:
             data = self.load_initial(data, paths, "quijote")
         if load_fitted:
-            assert nsnap == 4
+            data = self.load_fitted(data, paths, "quijote")
 
         if load_initial and with_lagpatch:
             data = data[numpy.isfinite(data["lagpatch_size"])]
