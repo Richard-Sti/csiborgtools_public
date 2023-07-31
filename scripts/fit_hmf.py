@@ -59,12 +59,12 @@ def get_counts(nsim, bins, paths, parser_args):
 
     if simname == "csiborg":
         cat = csiborgtools.read.CSiBORGHaloCatalogue(
-            nsim, paths, bounds=bounds, load_initial=False)
-        logmass = numpy.log10(cat["totpartmass"])
+            nsim, paths, bounds=bounds, load_fitted=False, load_initial=False)
+        logmass = numpy.log10(cat["fof_totpartmass"])
         counts = csiborgtools.fits.number_counts(logmass, bins)
     elif simname == "quijote":
-        cat0 = csiborgtools.read.QuijoteHaloCatalogue(nsim, paths, nsnap=4,
-                                                      load_initial=False)
+        cat0 = csiborgtools.read.QuijoteHaloCatalogue(
+            nsim, paths, nsnap=4, load_fitted=False, load_initial=False)
         nmax = int(cat0.box.boxsize // (2 * parser_args.Rmax))**3
         counts = numpy.full((nmax, len(bins) - 1), numpy.nan,
                             dtype=numpy.float32)
@@ -74,8 +74,8 @@ def get_counts(nsim, bins, paths, parser_args):
             logmass = numpy.log10(cat["group_mass"])
             counts[nobs, :] = csiborgtools.fits.number_counts(logmass, bins)
     elif simname == "quijote_full":
-        cat = csiborgtools.read.QuijoteHaloCatalogue(nsim, paths, nsnap=4,
-                                                     load_initial=False)
+        cat = csiborgtools.read.QuijoteHaloCatalogue(
+            nsim, paths, nsnap=4, load_fitted=False, load_initial=False)
         logmass = numpy.log10(cat["group_mass"])
         counts = csiborgtools.fits.number_counts(logmass, bins)
     else:
@@ -91,11 +91,14 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--simname", type=str,
                         choices=["csiborg", "quijote", "quijote_full"],
-                        help="Simulation name")
+                        help="Simulation name.")
     parser.add_argument("--nsims", type=int, nargs="+", default=None,
-                        help="Indices of simulations to cross. If `-1` processes all simulations.")  # noqa
-    parser.add_argument("--Rmax", type=float, default=155/0.705,
-                        help="High-resolution region radius. Ignored for `quijote_full`.")  # noqa
+                        help="Indices of simulations to cross. If `-1` all .")
+    parser.add_argument(
+        "--Rmax", type=float, default=155,
+        help="High-resolution region radius. Ignored for `quijote_full`.")
+    parser.add_argument("--lims", type=float, nargs="+", default=[11., 16.],
+                        help="Mass limits in Msun / h.")
     parser.add_argument("--bw", type=float, default=0.2,
                         help="Bin width in dex.")
     parser.add_argument("--verbose", type=lambda x: bool(strtobool(x)),
@@ -104,7 +107,11 @@ if __name__ == "__main__":
 
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsims = get_nsims(parser_args, paths)
-    bins = numpy.arange(11., 16., parser_args.bw, dtype=numpy.float32)
+
+    if len(parser_args.lims) != 2:
+        raise ValueError("Mass limits must be a pair of floats.")
+
+    bins = numpy.arange(*parser_args.lims, parser_args.bw, dtype=numpy.float32)
 
     def do_work(nsim):
         get_counts(nsim, bins, paths, parser_args)
