@@ -96,7 +96,7 @@ if __name__ == "__main__":
                         help="Indices of simulations to cross. If `-1` all .")
     parser.add_argument(
         "--Rmax", type=float, default=155,
-        help="High-resolution region radius. Ignored for `quijote_full`.")
+        help="High-res region radius in Mpc / h. Ignored for `quijote_full`.")
     parser.add_argument("--lims", type=float, nargs="+", default=[11., 16.],
                         help="Mass limits in Msun / h.")
     parser.add_argument("--bw", type=float, default=0.2,
