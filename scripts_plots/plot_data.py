@@ -145,9 +145,10 @@ def plot_hmf(pdf=False):
             csiborg_counts = numpy.full((len(csiborg_nsims), len(bins) - 1),
                                         numpy.nan, dtype=numpy.float32)
         csiborg_counts[i, :] = data["counts"]
-    print(data["counts"])
-    print(csiborg_counts)
-    csiborg_counts /= numpy.diff(bins).reshape(1, -1)
+    # csiborg_counts /= numpy.diff(bins).reshape(1, -1)
+
+    csiborg5511 = numpy.load(paths.halo_counts("csiborg", 5511))["counts"]
+    # csiborg5511 /= numpy.diff(data["bins"])
 
     print("Loading Quijote halo counts.", flush=True)
     quijote_nsims = paths.get_ics("quijote")
@@ -160,11 +161,12 @@ def plot_hmf(pdf=False):
                 (len(quijote_nsims) * nmax, len(bins) - 1), numpy.nan,
                 dtype=numpy.float32)
         quijote_counts[i * nmax:(i + 1) * nmax, :] = data["counts"]
-    quijote_counts /= numpy.diff(bins).reshape(1, -1)
+    # quijote_counts /= numpy.diff(bins).reshape(1, -1)
 
-    vol = 155.5**3
-    csiborg_counts /= vol
-    quijote_counts /= vol
+    # vol = 155.5**3
+    # csiborg_counts /= vol
+    # quijote_counts /= vol
+    # csiborg5511 /= vol
 
     x = 10**(0.5 * (bins[1:] + bins[:-1]))
     # Edit lower limits
@@ -173,11 +175,12 @@ def plot_hmf(pdf=False):
     # Edit upper limits
     csiborg_counts[:, x > 3e15] = numpy.nan
     quijote_counts[:, x > 3e15] = numpy.nan
+    csiborg5511[x > 3e15] = numpy.nan
 
     with plt.style.context(plt_utils.mplstyle):
         fig, ax = plt.subplots(nrows=2, sharex=True,
                                figsize=(3.5, 2.625 * 1.25),
-                               gridspec_kw={"height_ratios": [1, 0.65]})
+                               gridspec_kw={"height_ratios": [1, 0.45]})
         fig.subplots_adjust(hspace=0, wspace=0)
 
         # Upper panel data
@@ -192,6 +195,11 @@ def plot_hmf(pdf=False):
         ax[0].plot(x, mean_quijote, label="Quijote")
         ax[0].fill_between(x, mean_quijote - std_quijote,
                            mean_quijote + std_quijote, alpha=0.5)
+
+        ax[0].plot(x, csiborg5511, label="CSiBORG 5511", c="k", ls="--")
+        std5511 = numpy.sqrt(csiborg5511)
+        ax[0].fill_between(x, csiborg5511 - std_csiborg, csiborg5511 + std5511,
+                           alpha=0.2, color="k")
         # Lower panel data
         log_y = numpy.log10(mean_csiborg / mean_quijote)
         err = numpy.sqrt((std_csiborg / mean_csiborg / numpy.log(10))**2
@@ -203,8 +211,9 @@ def plot_hmf(pdf=False):
         # Labels and accesories
         ax[1].axhline(1, color="k", ls="--",
                       lw=0.5 * plt.rcParams["lines.linewidth"], zorder=0)
-        ax[0].set_ylabel(r"$\frac{\mathrm{d}^2 N}{\mathrm{d} V \mathrm{d}\log M_{\rm tot}}~[\mathrm{dex}^{-1} (\mathrm{Mpc} / h)^{-3}]$",  # noqa
-                         fontsize="small")
+        # ax[0].set_ylabel(r"$\frac{\mathrm{d}^2 N}{\mathrm{d} V \mathrm{d}\log M_{\rm tot}}~[\mathrm{dex}^{-1} (\mathrm{Mpc} / h)^{-3}]$",  # noqa
+        #                  fontsize="small")
+        ax[0].set_ylabel("Counts in bins")
         ax[1].set_xlabel(r"$M_{\rm tot}~[M_\odot / h]$", fontsize="small")
         ax[1].set_ylabel(r"$\mathrm{CSiBORG} / \mathrm{Quijote}$",
                          fontsize="small")
@@ -213,7 +222,7 @@ def plot_hmf(pdf=False):
         ax[0].set_yscale("log")
         ax[1].set_ylim(0.5, 2.0)
         # ax[1].set_yscale("log")
-        ax[0].legend()
+        ax[0].legend(fontsize="small")
 
         fig.tight_layout(h_pad=0, w_pad=0)
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
