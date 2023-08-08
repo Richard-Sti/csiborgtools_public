@@ -103,6 +103,9 @@ def pair_match(nsim0, nsimx, simname, min_logmass, sigma, verbose):
                                             verbose=verbose)
     delta_bckg = overlapper.make_bckg_delta(partsx, halomapx, hid2mapx, catx,
                                             delta=delta_bckg, verbose=verbose)
+    if verbose:
+        print()
+
 
     if verbose:
         print(f"{datetime.now()}: NGP crossing the simulations.", flush=True)
@@ -111,6 +114,8 @@ def pair_match(nsim0, nsimx, simname, min_logmass, sigma, verbose):
     match_indxs, ngp_overlap = matcher.cross(cat0, catx, parts0, partsx,
                                              halomap0, halomapx, delta_bckg,
                                              verbose=verbose)
+    if verbose:
+        print()
 
     # We want to store the halo IDs of the matches, not their array positions
     # in the catalogues.
