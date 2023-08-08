@@ -38,6 +38,8 @@ class PairOverlap:
         Halo catalogue corresponding to the cross simulation.
     paths : py:class`csiborgtools.read.Paths`
         CSiBORG paths object.
+    min_logmass : float
+        Minimum halo mass in :math:`\log_{10} M_\odot / h` to consider.
     maxdist : float, optional
         Maximum halo distance in :math:`\mathrm{Mpc} / h` from the centre of
         the high-resolution region. Removes overlaps of haloes outside it.
@@ -46,28 +48,30 @@ class PairOverlap:
     _catx = None
     _data = None
 
-    def __init__(self, cat0, catx, paths, maxdist=None):
+    def __init__(self, cat0, catx, paths, min_logmass, maxdist=None):
         if cat0.simname != catx.simname:
             raise ValueError("The two catalogues must be from the same "
                              "simulation.")
 
         self._cat0 = cat0
         self._catx = catx
-        self.load(cat0, catx, paths, maxdist)
+        self.load(cat0, catx, paths, min_logmass, maxdist)
 
-    def load(self, cat0, catx, paths, maxdist=None):
+    def load(self, cat0, catx, paths, min_logmass, maxdist=None):
         r"""
         Load overlap calculation results. Matches the results back to the two
         catalogues in question.
 
         Parameters
         ----------
-        cat0 : :py:class:`csiborgtools.read.CSiBORGHaloCatalogue`
+        cat0 : instance of :py:class:`csiborgtools.read.BaseCatalogue`
             Halo catalogue corresponding to the reference simulation.
-        catx : :py:class:`csiborgtools.read.CSiBORGHaloCatalogue`
+        catx : instance of :py:class:`csiborgtools.read.BaseCatalogue`
             Halo catalogue corresponding to the cross simulation.
         paths : py:class`csiborgtools.read.Paths`
             CSiBORG paths object.
+        min_logmass : float
+            Minimum halo mass in :math:`\log_{10} M_\odot / h` to consider.
         maxdist : float, optional
             Maximum halo distance in :math:`\mathrm{Mpc} / h` from the centre
             of the high-resolution region.
@@ -81,8 +85,10 @@ class PairOverlap:
 
         # We first load in the output files. We need to find the right
         # combination of the reference and cross simulation.
-        fname = paths.overlap(cat0.simname, nsim0, nsimx, smoothed=False)
-        fname_inv = paths.overlap(cat0.simname, nsimx, nsim0, smoothed=False)
+        fname = paths.overlap(cat0.simname, nsim0, nsimx, min_logmass,
+                              smoothed=False)
+        fname_inv = paths.overlap(cat0.simname, nsimx, nsim0, min_logmass,
+                                  smoothed=False)
         if isfile(fname):
             data_ngp = numpy.load(fname, allow_pickle=True)
             to_invert = False
@@ -94,7 +100,7 @@ class PairOverlap:
             raise FileNotFoundError(f"No file found for {nsim0} and {nsimx}.")
 
         fname_smooth = paths.overlap(cat0.simname, cat0.nsim, catx.nsim,
-                                     smoothed=True)
+                                     min_logmass, smoothed=True)
         data_smooth = numpy.load(fname_smooth, allow_pickle=True)
 
         # Create mapping from halo indices to array positions in the catalogue.
@@ -769,7 +775,7 @@ class NPairsOverlap:
 ###############################################################################
 
 
-def get_cross_sims(simname, nsim0, paths, smoothed):
+def get_cross_sims(simname, nsim0, paths, min_logmass, smoothed):
     """
     Get the list of cross simulations for a given reference simulation for
     which the overlap has been calculated.
@@ -782,6 +788,8 @@ def get_cross_sims(simname, nsim0, paths, smoothed):
         Reference simulation number.
     paths : :py:class:`csiborgtools.paths.Paths`
         Paths object.
+    min_logmass : float
+        Minimum log mass of halos to consider.
     smoothed : bool
         Whether to use the smoothed overlap or not.
     """
@@ -789,8 +797,8 @@ def get_cross_sims(simname, nsim0, paths, smoothed):
     for nsimx in paths.get_ics("csiborg"):
         if nsimx == nsim0:
             continue
-        f1 = paths.overlap(simname, nsim0, nsimx, smoothed)
-        f2 = paths.overlap(simname, nsimx, nsim0, smoothed)
+        f1 = paths.overlap(simname, nsim0, nsimx, min_logmass, smoothed)
+        f2 = paths.overlap(simname, nsimx, nsim0, min_logmass, smoothed)
         if isfile(f1) or isfile(f2):
             nsimxs.append(nsimx)
     return nsimxs
