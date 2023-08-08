@@ -462,7 +462,7 @@ class Paths:
         fname = f"out_{str(nsim).zfill(5)}_{str(nsnap).zfill(5)}.npy"
         return join(fdir, fname)
 
-    def overlap(self, simname, nsim0, nsimx, smoothed):
+    def overlap(self, simname, nsim0, nsimx, min_logmass, smoothed):
         """
         Path to the overlap files between two CSiBORG simulations.
 
@@ -474,6 +474,8 @@ class Paths:
             IC realisation index of the first simulation.
         nsimx : int
             IC realisation index of the second simulation.
+        min_logmass : float
+            Minimum log mass of halos to consider.
         smoothed : bool
             Whether the overlap is smoothed or not.
 
@@ -490,7 +492,11 @@ class Paths:
 
         try_create_directory(fdir)
 
-        fname = f"overlap_{str(nsim0).zfill(5)}_{str(nsimx).zfill(5)}.npz"
+        nsim0 = str(nsim0).zfill(5)
+        nsimx = str(nsimx).zfill(5)
+        min_logmass = float('%.4g' % min_logmass)
+
+        fname = f"overlap_{nsim0}_{nsimx}_{min_logmass}.npz"
         if smoothed:
             fname = fname.replace("overlap", "overlap_smoothed")
         return join(fdir, fname)

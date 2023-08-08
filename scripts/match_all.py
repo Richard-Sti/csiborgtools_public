@@ -53,7 +53,7 @@ def get_combs(simname):
     return combs
 
 
-def main(comb, simname, sigma, verbose):
+def main(comb, simname, min_logmass, sigma, verbose):
     """
     Match a pair of simulations.
 
@@ -63,6 +63,8 @@ def main(comb, simname, sigma, verbose):
         Pair of simulation IC indices.
     simname : str
         Simulation name.
+    min_logmass : float
+        Minimum log halo mass.
     sigma : float
         Smoothing scale in number of grid cells.
     verbose : bool
@@ -73,13 +75,15 @@ def main(comb, simname, sigma, verbose):
     None
     """
     nsim0, nsimx = comb
-    pair_match(nsim0, nsimx, simname, sigma, verbose)
+    pair_match(nsim0, nsimx, simname, min_logmass, sigma, verbose)
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--simname", type=str, help="Simulation name.",
-                        choices=["csiborg", "quijote"])
+    parser.add_argument("--simname", type=str, required=True,
+                        help="Simulation name.", choices=["csiborg", "quijote"])
+    parser.add_argument("--min_logmass", type=float, required=True,
+                        help="Minimum log halo mass.")
     parser.add_argument("--sigma", type=float, default=0,
                         help="Smoothing scale in number of grid cells.")
     parser.add_argument("--verbose", type=lambda x: bool(strtobool(x)),
@@ -89,7 +93,7 @@ if __name__ == "__main__":
     combs = get_combs()
 
     def _main(comb):
-        main(comb, args.simname, args.sigma, args.verbose)
+        main(comb, args.simname, args.min_logmass, args.sigma, args.verbose)
 
     work_delegation(_main, combs, MPI.COMM_WORLD)
 

@@ -13,10 +13,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """
 A script to calculate overlap between two IC realisations of the same
-simulation. The matching is performed for haloes whose total particles mass is
-    - CSiBORG: > 1e13 Msun/h,
-    - Quijote: > 1e14 Msun/h,
-since Quijote has much lower resolution than CSiBORG.
+simulation.
 """
 from argparse import ArgumentParser
 from copy import deepcopy
@@ -35,7 +32,7 @@ except ModuleNotFoundError:
     import csiborgtools
 
 
-def pair_match(nsim0, nsimx, simname, sigma, verbose):
+def pair_match(nsim0, nsimx, simname, min_logmass, sigma, verbose):
     """
     Calculate overlaps between two simulations.
 
@@ -47,6 +44,8 @@ def pair_match(nsim0, nsimx, simname, sigma, verbose):
         The cross simulation IC index.
     simname : str
         Simulation name.
+    min_logmass : float
+        Minimum log halo mass.
     sigma : float
         Smoothing scale in number of grid cells.
     verbose : bool
@@ -62,7 +61,7 @@ def pair_match(nsim0, nsimx, simname, sigma, verbose):
     if simname == "csiborg":
         overlapper_kwargs = {"box_size": 2048, "bckg_halfsize": 512}
         mass_kind = "fof_totpartmass"
-        bounds = {"dist": (0, 155), mass_kind: (10**13.25, None)}
+        bounds = {"dist": (0, 155), mass_kind: (10**min_logmass, None)}
 
         cat0 = csiborgtools.read.CSiBORGHaloCatalogue(
             nsim0, paths, bounds=bounds, load_fitted=False,
@@ -73,7 +72,7 @@ def pair_match(nsim0, nsimx, simname, sigma, verbose):
     elif simname == "quijote":
         overlapper_kwargs = {"box_size": 512, "bckg_halfsize": 256}
         mass_kind = "group_mass"
-        bounds = {mass_kind: (10**13.25, None)}
+        bounds = {mass_kind: (10**min_logmass, None)}
 
         cat0 = csiborgtools.read.QuijoteHaloCatalogue(
             nsim0, paths, 4, bounds=bounds, load_fitted=False,
@@ -120,7 +119,7 @@ def pair_match(nsim0, nsimx, simname, sigma, verbose):
         for j, match in enumerate(matches):
             match_hids[i][j] = catx["index"][match]
 
-    fout = paths.overlap(simname, nsim0, nsimx, smoothed=False)
+    fout = paths.overlap(simname, nsim0, nsimx, min_logmass, smoothed=False)
     if verbose:
         print(f"{datetime.now()}: saving to ... `{fout}`.", flush=True)
     numpy.savez(fout, ref_hids=cat0["index"], match_hids=match_hids,
@@ -139,7 +138,7 @@ def pair_match(nsim0, nsimx, simname, sigma, verbose):
                                               match_indxs, smooth_kwargs,
                                               verbose=verbose)
 
-    fout = paths.overlap(simname, nsim0, nsimx, smoothed=True)
+    fout = paths.overlap(simname, nsim0, nsimx, min_logmass, smoothed=True)
     if verbose:
         print(f"{datetime.now()}: saving to ... `{fout}`.", flush=True)
     numpy.savez(fout, smoothed_overlap=smoothed_overlap, sigma=sigma)
@@ -147,15 +146,19 @@ def pair_match(nsim0, nsimx, simname, sigma, verbose):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--nsim0", type=int,
+    parser.add_argument("--nsim0", type=int, required=True,
                         help="Reference simulation IC index.")
-    parser.add_argument("--nsimx", type=int,
+    parser.add_argument("--nsimx", type=int, required=True,
                         help="Cross simulation IC index.")
-    parser.add_argument("--simname", type=str, help="Simulation name.")
+    parser.add_argument("--simname", type=str, required=True,
+                        help="Simulation name.")
+    parser.add_argument("--min_logmass", type=float, required=True,
+                        help="Minimum log halo mass.")
     parser.add_argument("--sigma", type=float, default=0,
                         help="Smoothing scale in number of grid cells.")
     parser.add_argument("--verbose", type=lambda x: bool(strtobool(x)),
                         default=False, help="Verbosity flag.")
     args = parser.parse_args()
 
-    pair_match(args.nsim0, args.nsimx, args.simname, args.sigma, args.verbose)
+    pair_match(args.nsim0, args.nsimx, args.simname, args.min_logmass,
+               args.sigma, args.verbose)
