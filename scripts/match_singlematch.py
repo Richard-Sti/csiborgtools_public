@@ -23,13 +23,75 @@ from distutils.util import strtobool
 import numpy
 from scipy.ndimage import gaussian_filter
 
-try:
-    import csiborgtools
-except ModuleNotFoundError:
-    import sys
+import csiborgtools
 
-    sys.path.append("../")
-    import csiborgtools
+
+def pair_match_max(nsim0, nsimx, simname, min_logmass, mult, verbose):
+    """
+    Match a pair of simulations using the method of [1].
+
+    Parameters
+    ----------
+    nsim0 : int
+        The reference simulation IC index.
+    nsimx : int
+        The cross simulation IC index.
+    simname : str
+        Simulation name.
+    min_logmass : float
+        Minimum log halo mass.
+    mult : float
+        Multiplicative factor for search radius.
+    verbose : bool
+        Verbosity flag.
+
+    Returns
+    -------
+    None
+
+    References
+    ----------
+    [1] Maxwell L Hutt, Harry Desmond, Julien Devriendt, Adrianne Slyz; The
+    effect of local Universe constraints on halo abundance and clustering;
+    Monthly Notices of the Royal Astronomical Society, Volume 516, Issue 3,
+    November 2022, Pages 3592–3601, https://doi.org/10.1093/mnras/stac2407
+    """
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+
+    if simname == "csiborg":
+        mass_kind = "fof_totpartmass"
+        maxdist = 155
+        periodic = False
+        bounds = {"dist": (0, maxdist), mass_kind: (10**min_logmass, None)}
+        cat0 = csiborgtools.read.CSiBORGHaloCatalogue(
+            nsim0, paths, bounds=bounds, load_fitted=True, load_initial=False)
+        catx = csiborgtools.read.CSiBORGHaloCatalogue(
+            nsimx, paths, bounds=bounds, load_fitted=True, load_initial=False)
+    elif simname == "quijote":
+        mass_kind = "group_mass"
+        maxdist = None
+        periodic = True
+        bounds = {mass_kind: (10**min_logmass, None)}
+        cat0 = csiborgtools.read.QuijoteHaloCatalogue(
+            nsim0, paths, 4, bounds=bounds, load_fitted=True,
+            load_initial=False)
+        catx = csiborgtools.read.QuijoteHaloCatalogue(
+            nsimx, paths, 4, bounds=bounds, load_fitted=True,
+            load_initial=False)
+    else:
+        raise ValueError(f"Unknown simulation `{simname}`.")
+
+    reader = csiborgtools.read.PairOverlap(cat0, catx, paths, min_logmass,
+                                           maxdist=maxdist)
+    out = csiborgtools.match.matching_max(
+        cat0, catx, mass_kind, mult=mult, periodic=periodic,
+        overlap=reader.overlap(from_smoothed=True),
+        match_indxs=reader["match_indxs"], verbose=verbose)
+
+    fout = paths.match_max(simname, nsim0, nsimx, min_logmass, mult)
+    if verbose:
+        print(f"{datetime.now()}: saving to ... `{fout}`.", flush=True)
+    numpy.savez(fout, **{p: out[p] for p in out.dtype.names})
 
 
 def pair_match(nsim0, nsimx, simname, min_logmass, sigma, verbose):
@@ -95,27 +157,17 @@ def pair_match(nsim0, nsimx, simname, min_logmass, sigma, verbose):
         paths.initmatch(nsimx, simname, "particles"))["particles"]
     hid2mapx = {hid: i for i, hid in enumerate(halomapx[:, 0])}
 
-    if verbose:
-        print(f"{datetime.now()}: calculating the background density fields.",
-              flush=True)
     overlapper = csiborgtools.match.ParticleOverlap(**overlapper_kwargs)
     delta_bckg = overlapper.make_bckg_delta(parts0, halomap0, hid2map0, cat0,
                                             verbose=verbose)
     delta_bckg = overlapper.make_bckg_delta(partsx, halomapx, hid2mapx, catx,
                                             delta=delta_bckg, verbose=verbose)
-    if verbose:
-        print()
 
-
-    if verbose:
-        print(f"{datetime.now()}: NGP crossing the simulations.", flush=True)
     matcher = csiborgtools.match.RealisationsMatcher(
         mass_kind=mass_kind, **overlapper_kwargs)
     match_indxs, ngp_overlap = matcher.cross(cat0, catx, parts0, partsx,
                                              halomap0, halomapx, delta_bckg,
                                              verbose=verbose)
-    if verbose:
-        print()
 
     # We want to store the halo IDs of the matches, not their array positions
     # in the catalogues.
@@ -151,6 +203,8 @@ def pair_match(nsim0, nsimx, simname, min_logmass, sigma, verbose):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
+    parser.add_argument("--kind", type=str, required=True,
+                        choices=["overlap", "max"], help="Kind of matching.")
     parser.add_argument("--nsim0", type=int, required=True,
                         help="Reference simulation IC index.")
     parser.add_argument("--nsimx", type=int, required=True,
@@ -159,11 +213,19 @@ if __name__ == "__main__":
                         help="Simulation name.")
     parser.add_argument("--min_logmass", type=float, required=True,
                         help="Minimum log halo mass.")
+    parser.add_argument("--mult", type=float, default=5,
+                        help="Search radius multiplier for Max's method.")
     parser.add_argument("--sigma", type=float, default=0,
                         help="Smoothing scale in number of grid cells.")
     parser.add_argument("--verbose", type=lambda x: bool(strtobool(x)),
                         default=False, help="Verbosity flag.")
     args = parser.parse_args()
 
-    pair_match(args.nsim0, args.nsimx, args.simname, args.min_logmass,
-               args.sigma, args.verbose)
+    if args.kind == "overlap":
+        pair_match(args.nsim0, args.nsimx, args.simname, args.min_logmass,
+                   args.sigma, args.verbose)
+    elif args.kind == "max":
+        pair_match_max(args.nsim0, args.nsimx, args.simname, args.min_logmass,
+                       args.mult, args.verbose)
+    else:
+        raise ValueError(f"Unknown matching kind: `{args.kind}`.")

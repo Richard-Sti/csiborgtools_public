@@ -21,6 +21,8 @@ from os.path import isfile
 import numpy
 from tqdm import tqdm, trange
 
+from ..utils import periodic_distance
+
 ###############################################################################
 #                         Overlap of two simulations                          #
 ###############################################################################
@@ -47,6 +49,7 @@ class PairOverlap:
     _cat0 = None
     _catx = None
     _data = None
+    _paths = None
 
     def __init__(self, cat0, catx, paths, min_logmass, maxdist=None):
         if cat0.simname != catx.simname:
@@ -55,6 +58,7 @@ class PairOverlap:
 
         self._cat0 = cat0
         self._catx = catx
+        self._paths = paths
         self.load(cat0, catx, paths, min_logmass, maxdist)
 
     def load(self, cat0, catx, paths, min_logmass, maxdist=None):
@@ -257,6 +261,8 @@ class PairOverlap:
         for i in range(len(overlap)):
             if len(overlap[i]) > 0:
                 out[i] = numpy.sum(overlap[i])
+            else:
+                out[i] = 0
         return out
 
     def prob_nomatch(self, from_smoothed):
@@ -279,9 +285,11 @@ class PairOverlap:
         for i in range(len(overlap)):
             if len(overlap[i]) > 0:
                 out[i] = numpy.product(numpy.subtract(1, overlap[i]))
+            else:
+                out[i] = 1
         return out
 
-    def dist(self, in_initial, norm_kind=None):
+    def dist(self, in_initial, boxsize, norm_kind=None):
         """
         Pair distances of matched halos between the reference and cross
         simulations.
@@ -290,6 +298,8 @@ class PairOverlap:
         ----------
         in_initial : bool
             Whether to calculate separation in the initial or final snapshot.
+        boxsize : float
+            The size of the simulation box.
         norm_kind : str, optional
             The kind of normalisation to apply to the distances.
             Can be `r200c`, `ref_patch` or `sum_patch`.
@@ -320,8 +330,7 @@ class PairOverlap:
         # Now calculate distances
         dist = [None] * len(self)
         for i, ind in enumerate(self["match_indxs"]):
-            # n refers to the reference halo catalogue position
-            dist[i] = numpy.linalg.norm(pos0[i, :] - posx[ind, :], axis=1)
+            dist[i] = periodic_distance(posx[ind, :], pos0[i, :], boxsize)
 
             if norm_kind is not None:
                 dist[i] /= norm[i]
@@ -358,7 +367,7 @@ class PairOverlap:
                 ratio[i] = numpy.abs(ratio[i])
         return numpy.array(ratio, dtype=object)
 
-    def max_overlap_key(self, key, from_smoothed):
+    def max_overlap_key(self, key, min_overlap, from_smoothed):
         """
         Calculate the maximum overlap mass of each halo in the reference
         simulation from the cross simulation.
@@ -367,10 +376,10 @@ class PairOverlap:
         ----------
         key : str
             Key to the maximum overlap statistic to calculate.
+        min_overlap : float
+            Minimum pair overlap to consider.
         from_smoothed : bool
             Whether to use the smoothed overlap or not.
-        mass_kind : str, optional
-            The mass kind whose ratio is to be calculated.
 
         Returns
         -------
@@ -384,11 +393,15 @@ class PairOverlap:
             # Skip if no match
             if len(match_ind) == 0:
                 continue
-            out[i] = y[match_ind][numpy.argmax(overlap[i])]
+
+            k = numpy.argmax(overlap[i])
+            if overlap[i][k] > min_overlap:
+                out[i] = y[match_ind][k]
+
         return out
 
     def counterpart_mass(self, from_smoothed, overlap_threshold=0.,
-                         in_log=False, mass_kind="totpartmass"):
+                         mass_kind="totpartmass"):
         """
         Calculate the expected counterpart mass of each halo in the reference
         simulation from the crossed simulation.
@@ -400,9 +413,6 @@ class PairOverlap:
         overlap_threshold : float, optional
             Minimum overlap required for a halo to be considered a match. By
             default 0.0, i.e. no threshold.
-        in_log : bool, optional
-            Whether to calculate the expectation value in log space. By default
-            `False`.
         mass_kind : str, optional
             The mass kind whose ratio is to be calculated. Must be a valid
             catalogue key. By default `totpartmass`, i.e. the total particle
@@ -434,14 +444,10 @@ class PairOverlap:
                 massx_ = massx_[mask]
                 overlap_ = overlap_[mask]
 
-            massx_ = numpy.log10(massx_) if in_log else massx_
+            massx_ = numpy.log10(massx_)
             # Weighted average and *biased* standard deviation
             mean_ = numpy.average(massx_, weights=overlap_)
             std_ = numpy.average((massx_ - mean_)**2, weights=overlap_)**0.5
-
-            # If in log, convert back to linear
-            mean_ = 10**mean_ if in_log else mean_
-            std_ = mean_ * std_ * numpy.log(10) if in_log else std_
 
             mean[i] = mean_
             std[i] = std_
@@ -544,7 +550,7 @@ def weighted_stats(x, weights, min_weight=0, verbose=False):
     """
     out = numpy.full((x.size, 2), numpy.nan, dtype=numpy.float32)
 
-    for i in trange(len(x)) if verbose else range(len(x)):
+    for i in trange(len(x), disable=not verbose):
         x_, w_ = numpy.asarray(x[i]), numpy.asarray(weights[i])
         mask = w_ > min_weight
         x_ = x_[mask]
@@ -574,27 +580,30 @@ class NPairsOverlap:
         List of cross simulation halo catalogues.
     paths : py:class`csiborgtools.read.Paths`
         CSiBORG paths object.
+    min_logmass : float
+        Minimum log mass of halos to consider.
     verbose : bool, optional
         Verbosity flag for loading the overlap objects.
     """
     _pairs = None
 
-    def __init__(self, cat0, catxs, paths, verbose=True):
+    def __init__(self, cat0, catxs, paths, min_logmass, verbose=True):
         pairs = [None] * len(catxs)
-        if verbose:
-            print("Loading individual overlap objects...", flush=True)
-        for i, catx in enumerate(tqdm(catxs) if verbose else catxs):
-            pairs[i] = PairOverlap(cat0, catx, paths)
+        for i, catx in enumerate(tqdm(catxs, desc="Loading overlap objects",
+                                      disable=not verbose)):
+            pairs[i] = PairOverlap(cat0, catx, paths, min_logmass)
 
         self._pairs = pairs
 
-    def max_overlap(self, from_smoothed, verbose=True):
+    def max_overlap(self, min_overlap, from_smoothed, verbose=True):
         """
         Calculate maximum overlap of each halo in the reference simulation with
         the cross simulations.
 
         Parameters
         ----------
+        min_overlap : float
+            Minimum pair overlap to consider.
         from_smoothed : bool
             Whether to use the smoothed overlap or not.
         verbose : bool, optional
@@ -604,21 +613,24 @@ class NPairsOverlap:
         -------
         max_overlap : 2-dimensional array of shape `(nhalos, ncatxs)`
         """
-        out = [None] * len(self)
-        if verbose:
-            print("Calculating maximum overlap...", flush=True)
-
         def get_max(y_):
             if len(y_) == 0:
-                return numpy.nan
-            return numpy.max(y_)
+                return 0
+            out = numpy.max(y_)
 
-        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
+            return out if out >= min_overlap else 0
+
+        iterator = tqdm(self.pairs,
+                        desc="Calculating maximum overlap",
+                        disable=not verbose
+                        )
+        out = [None] * len(self)
+        for i, pair in enumerate(iterator):
             out[i] = numpy.asanyarray([get_max(y_)
                                        for y_ in pair.overlap(from_smoothed)])
         return numpy.vstack(out).T
 
-    def max_overlap_key(self, key, from_smoothed, verbose=True):
+    def max_overlap_key(self, key, min_overlap, from_smoothed, verbose=True):
         """
         Calculate maximum overlap mass of each halo in the reference
         simulation with the cross simulations.
@@ -627,6 +639,8 @@ class NPairsOverlap:
         ----------
         key : str
             Key to the maximum overlap statistic to calculate.
+        min_overlap : float
+            Minimum pair overlap to consider.
         from_smoothed : bool
             Whether to use the smoothed overlap or not.
         verbose : bool, optional
@@ -636,12 +650,13 @@ class NPairsOverlap:
         -------
         out : 2-dimensional array of shape `(nhalos, ncatxs)`
         """
+        iterator = tqdm(self.pairs,
+                        desc=f"Calculating maximum overlap {key}",
+                        disable=not verbose
+                        )
         out = [None] * len(self)
-        if verbose:
-            print(f"Calculating maximum overlap {key}...", flush=True)
-
-        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
-            out[i] = pair.max_overlap_key(key, from_smoothed)
+        for i, pair in enumerate(iterator):
+            out[i] = pair.max_overlap_key(key, min_overlap, from_smoothed)
 
         return numpy.vstack(out).T
 
@@ -661,10 +676,11 @@ class NPairsOverlap:
         -------
         summed_overlap : 2-dimensional array of shape `(nhalos, ncatxs)`
         """
+        iterator = tqdm(self.pairs,
+                        desc="Calculating summed overlap",
+                        disable=not verbose)
         out = [None] * len(self)
-        if verbose:
-            print("Calculating summed overlap...", flush=True)
-        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
+        for i, pair in enumerate(iterator):
             out[i] = pair.summed_overlap(from_smoothed)
         return numpy.vstack(out).T
 
@@ -684,16 +700,18 @@ class NPairsOverlap:
         -------
         prob_nomatch : 2-dimensional array of shape `(nhalos, ncatxs)`
         """
+        iterator = tqdm(self.pairs,
+                        desc="Calculating probability of no match",
+                        disable=not verbose
+                        )
         out = [None] * len(self)
-        if verbose:
-            print("Calculating probability of no match...", flush=True)
-        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
+        for i, pair in enumerate(iterator):
             out[i] = pair.prob_nomatch(from_smoothed)
         return numpy.vstack(out).T
 
     def counterpart_mass(self, from_smoothed, overlap_threshold=0.,
-                         in_log=False, mass_kind="totpartmass",
-                         return_full=False, verbose=True):
+                         mass_kind="totpartmass", return_full=False,
+                         verbose=True):
         """
         Calculate the expected counterpart mass of each halo in the reference
         simulation from the crossed simulation.
@@ -705,9 +723,6 @@ class NPairsOverlap:
         overlap_threshold : float, optional
             Minimum overlap required for a halo to be considered a match. By
             default 0.0, i.e. no threshold.
-        in_log : bool, optional
-            Whether to calculate the expectation value in log space. By default
-            `False`.
         mass_kind : str, optional
             The mass kind whose ratio is to be calculated. Must be a valid
             catalogue key. By default `totpartmass`, i.e. the total particle
@@ -727,25 +742,30 @@ class NPairsOverlap:
             Expected mass and standard deviation from each cross simulation.
             Returned only if `return_full` is `True`.
         """
+        iterator = tqdm(self.pairs,
+                        desc="Calculating counterpart masses",
+                        disable=not verbose)
         mus, stds = [None] * len(self), [None] * len(self)
-        if verbose:
-            print("Calculating counterpart masses...", flush=True)
-        for i, pair in enumerate(tqdm(self.pairs) if verbose else self.pairs):
+        for i, pair in enumerate(iterator):
             mus[i], stds[i] = pair.counterpart_mass(
                 from_smoothed=from_smoothed,
-                overlap_threshold=overlap_threshold, in_log=in_log,
-                mass_kind=mass_kind)
+                overlap_threshold=overlap_threshold, mass_kind=mass_kind)
         mus, stds = numpy.vstack(mus).T, numpy.vstack(stds).T
 
-        probmatch = 1 - self.prob_nomatch(from_smoothed)  # Prob of > 0 matches
+        # Prob of > 0 matches
+        probmatch = 1 - self.prob_nomatch(from_smoothed)
         # Normalise it for weighted sums etc.
         norm_probmatch = numpy.apply_along_axis(
             lambda x: x / numpy.sum(x), axis=1, arr=probmatch)
 
         # Mean and standard deviation of weighted stacked Gaussians
-        mu = numpy.sum(norm_probmatch * mus, axis=1)
-        std = numpy.sum(norm_probmatch * (mus**2 + stds**2), axis=1) - mu**2
+        mu = numpy.sum((norm_probmatch * mus), axis=1)
+        std = numpy.sum((norm_probmatch * (mus**2 + stds**2)), axis=1) - mu**2
         std **= 0.5
+
+        mask = mu <= 0
+        mu[mask] = numpy.nan
+        std[mask] = numpy.nan
 
         if return_full:
             return mu, std, mus, stds
@@ -765,6 +785,11 @@ class NPairsOverlap:
     @property
     def cat0(self):
         return self.pairs[0].cat0  # All pairs have the same ref catalogue
+
+    def __getitem__(self, key):
+        if not isinstance(key, int):
+            raise TypeError("Key must be an integer.")
+        return self.pairs[key]
 
     def __len__(self):
         return len(self.pairs)
@@ -794,7 +819,7 @@ def get_cross_sims(simname, nsim0, paths, min_logmass, smoothed):
         Whether to use the smoothed overlap or not.
     """
     nsimxs = []
-    for nsimx in paths.get_ics("csiborg"):
+    for nsimx in paths.get_ics(simname):
         if nsimx == nsim0:
             continue
         f1 = paths.overlap(simname, nsim0, nsimx, min_logmass, smoothed)

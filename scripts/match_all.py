@@ -12,6 +12,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """A script to match all IC pairs of a simulation."""
+import warnings
 from argparse import ArgumentParser
 from distutils.util import strtobool
 from itertools import combinations
@@ -20,15 +21,8 @@ from random import Random
 from mpi4py import MPI
 from taskmaster import work_delegation
 
-from match_singlematch import pair_match
-
-try:
-    import csiborgtools
-except ModuleNotFoundError:
-    import sys
-
-    sys.path.append("../")
-    import csiborgtools
+import csiborgtools
+from match_singlematch import pair_match, pair_match_max
 
 
 def get_combs(simname):
@@ -53,7 +47,7 @@ def get_combs(simname):
     return combs
 
 
-def main(comb, simname, min_logmass, sigma, verbose):
+def main(comb, kind, simname, min_logmass, sigma, mult, verbose):
     """
     Match a pair of simulations.
 
@@ -61,12 +55,16 @@ def main(comb, simname, min_logmass, sigma, verbose):
     ----------
     comb : tuple
         Pair of simulation IC indices.
+    kind : str
+        Kind of matching.
     simname : str
         Simulation name.
     min_logmass : float
         Minimum log halo mass.
     sigma : float
         Smoothing scale in number of grid cells.
+    mult : float
+        Multiplicative factor for search radius.
     verbose : bool
         Verbosity flag.
 
@@ -75,25 +73,46 @@ def main(comb, simname, min_logmass, sigma, verbose):
     None
     """
     nsim0, nsimx = comb
-    pair_match(nsim0, nsimx, simname, min_logmass, sigma, verbose)
+    if kind == "overlap":
+        pair_match(nsim0, nsimx, simname, min_logmass, sigma, verbose)
+    elif args.kind == "max":
+        pair_match_max(nsim0, nsimx, simname, min_logmass, mult, verbose)
+    else:
+        raise ValueError(f"Unknown matching kind: `{kind}`.")
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
+    parser.add_argument("--kind", type=str, required=True,
+                        choices=["overlap", "max"], help="Kind of matching.")
     parser.add_argument("--simname", type=str, required=True,
-                        help="Simulation name.", choices=["csiborg", "quijote"])
+                        help="Simulation name.",
+                        choices=["csiborg", "quijote"])
+    parser.add_argument("--nsim0", type=int, default=None,
+                        help="Reference IC for Max's matching method.")
     parser.add_argument("--min_logmass", type=float, required=True,
                         help="Minimum log halo mass.")
     parser.add_argument("--sigma", type=float, default=0,
                         help="Smoothing scale in number of grid cells.")
+    parser.add_argument("--mult", type=float, default=5,
+                        help="Search radius multiplier for Max's method.")
     parser.add_argument("--verbose", type=lambda x: bool(strtobool(x)),
                         default=False, help="Verbosity flag.")
     args = parser.parse_args()
 
-    combs = get_combs()
+    if args.kind == "overlap":
+        combs = get_combs(args.simname)
+    else:
+        paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+        combs = [(args.nsim0, nsimx) for nsimx in paths.get_ics(args.simname)
+                 if nsimx != args.nsim0]
 
     def _main(comb):
-        main(comb, args.simname, args.min_logmass, args.sigma, args.verbose)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore",
+                                    "invalid value encountered in cast",
+                                    RuntimeWarning)
+            main(comb, args.kind, args.simname, args.min_logmass, args.sigma,
+                 args.mult, args.verbose)
 
     work_delegation(_main, combs, MPI.COMM_WORLD)
-
