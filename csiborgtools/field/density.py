@@ -22,7 +22,6 @@ import numpy
 from numba import jit
 from tqdm import trange
 
-from ..read.utils import real2redshift
 from .interp import divide_nonzero
 from .utils import force_single_precision
 
@@ -33,25 +32,13 @@ class BaseField(ABC):
     _MAS = None
 
     @property
-    def boxsize(self):
-        """
-        Box size. Particle positions are always assumed to be in box units,
-        therefore this is 1.
-
-        Returns
-        -------
-        boxsize : float
-        """
-        return 1.
-
-    @property
     def box(self):
         """
         Simulation box information and transformations.
 
         Returns
         -------
-        box : :py:class:`csiborgtools.units.CSiBORGBox`
+        :py:class:`csiborgtools.units.CSiBORGBox`
         """
         return self._box
 
@@ -70,10 +57,10 @@ class BaseField(ABC):
 
         Returns
         -------
-        MAS : str
+        str
         """
         if self._MAS is None:
-            raise ValueError("`mas` is not set.")
+            raise ValueError("`MAS` is not set.")
         return self._MAS
 
     @MAS.setter
@@ -99,6 +86,8 @@ class DensityField(BaseField):
         Mass assignment scheme. Options are Options are: 'NGP' (nearest grid
         point), 'CIC' (cloud-in-cell), 'TSC' (triangular-shape cloud), 'PCS'
         (piecewise cubic spline).
+    paths : :py:class:`csiborgtools.read.Paths`
+        The simulation paths.
 
     References
     ----------
@@ -128,13 +117,12 @@ class DensityField(BaseField):
         delta -= 1
         return delta
 
-    def __call__(self, parts, grid, in_rsp, flip_xz=True, nbatch=30,
-                 verbose=True):
+    def __call__(self, parts, grid, flip_xz=True, nbatch=30, verbose=True):
         """
         Calculate the density field using a Pylians routine [1, 2].
         Iteratively loads the particles into memory, flips their `x` and `z`
         coordinates. Particles are assumed to be in box units, with positions
-        in [0, 1] and observer in the centre of the box if RSP is applied.
+        in [0, 1]
 
         Parameters
         ----------
@@ -143,8 +131,6 @@ class DensityField(BaseField):
             Columns are: `x`, `y`, `z`, `vx`, `vy`, `vz`, `M`.
         grid : int
             Grid size.
-        in_rsp : bool
-            Whether to calculate the density field in redshift space.
         flip_xz : bool, optional
             Whether to flip the `x` and `z` coordinates.
         nbatch : int, optional
@@ -173,21 +159,14 @@ class DensityField(BaseField):
             pos = parts[start:end]
             pos, vel, mass = pos[:, :3], pos[:, 3:6], pos[:, 6]
 
-            pos = force_single_precision(pos, "particle_position")
-            vel = force_single_precision(vel, "particle_velocity")
-            mass = force_single_precision(mass, "particle_mass")
+            pos = force_single_precision(pos)
+            vel = force_single_precision(vel)
+            mass = force_single_precision(mass)
             if flip_xz:
                 pos[:, [0, 2]] = pos[:, [2, 0]]
                 vel[:, [0, 2]] = vel[:, [2, 0]]
 
-            if in_rsp:
-                raise NotImplementedError("Redshift space needs to be fixed.")
-                # TODO change how called + units.
-                pos = real2redshift(pos, vel, [0.5, 0.5, 0.5], self.box,
-                                    in_box_units=True, periodic_wrap=True,
-                                    make_copy=False)
-
-            MASL.MA(pos, rho, self.boxsize, self.MAS, W=mass, verbose=False)
+            MASL.MA(pos, rho, 1., self.MAS, W=mass, verbose=False)
             if end == nparts:
                 break
             start = end
@@ -223,7 +202,7 @@ class VelocityField(BaseField):
 
     @staticmethod
     @jit(nopython=True)
-    def radial_velocity(rho_vel):
+    def radial_velocity(rho_vel, observer_velocity):
         """
         Calculate the radial velocity field around the observer in the centre
         of the box.
@@ -232,6 +211,8 @@ class VelocityField(BaseField):
         ----------
         rho_vel : 4-dimensional array of shape `(3, grid, grid, grid)`.
             Velocity field along each axis.
+        observer_velocity : 3-dimensional array of shape `(3,)`
+            Observer velocity.
 
         Returns
         -------
@@ -240,13 +221,19 @@ class VelocityField(BaseField):
         """
         grid = rho_vel.shape[1]
         radvel = numpy.zeros((grid, grid, grid), dtype=numpy.float32)
+        vx0, vy0, vz0 = observer_velocity
+
         for i in range(grid):
             px = i - 0.5 * (grid - 1)
             for j in range(grid):
                 py = j - 0.5 * (grid - 1)
                 for k in range(grid):
                     pz = k - 0.5 * (grid - 1)
-                    vx, vy, vz = rho_vel[:, i, j, k]
+
+                    vx = rho_vel[0, i, j, k] - vx0
+                    vy = rho_vel[1, i, j, k] - vy0
+                    vz = rho_vel[2, i, j, k] - vz0
+
                     radvel[i, j, k] = ((px * vx + py * vy + pz * vz)
                                        / numpy.sqrt(px**2 + py**2 + pz**2))
         return radvel
@@ -297,19 +284,19 @@ class VelocityField(BaseField):
             pos = parts[start:end]
             pos, vel, mass = pos[:, :3], pos[:, 3:6], pos[:, 6]
 
-            pos = force_single_precision(pos, "particle_position")
-            vel = force_single_precision(vel, "particle_velocity")
-            mass = force_single_precision(mass, "particle_mass")
+            pos = force_single_precision(pos)
+            vel = force_single_precision(vel)
+            mass = force_single_precision(mass)
             if flip_xz:
                 pos[:, [0, 2]] = pos[:, [2, 0]]
                 vel[:, [0, 2]] = vel[:, [2, 0]]
             vel *= mass.reshape(-1, 1)
 
             for i in range(3):
-                MASL.MA(pos, rho_vel[i], self.boxsize, self.MAS, W=vel[:, i],
+                MASL.MA(pos, rho_vel[i], 1., self.MAS, W=vel[:, i],
                         verbose=False)
 
-            MASL.MA(pos, cellcounts, self.boxsize, self.MAS, W=mass,
+            MASL.MA(pos, cellcounts, 1., self.MAS, W=mass,
                     verbose=False)
             if end == nparts:
                 break

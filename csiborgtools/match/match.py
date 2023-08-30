@@ -151,7 +151,7 @@ class RealisationsMatcher(BaseMatcher):
 
         Returns
         -------
-        dlogmass : float
+        float
         """
         return self._dlogmass
 
@@ -169,7 +169,7 @@ class RealisationsMatcher(BaseMatcher):
 
         Returns
         -------
-        mass_kind : str
+        str
         """
         return self._mass_kind
 
@@ -186,7 +186,7 @@ class RealisationsMatcher(BaseMatcher):
 
         Returns
         -------
-        overlapper : :py:class:`csiborgtools.match.ParticleOverlap`
+        :py:class:`csiborgtools.match.ParticleOverlap`
         """
         return self._overlapper
 
@@ -661,20 +661,7 @@ class ParticleOverlap(BaseMatcher):
 
 def pos2cell(pos, ncells):
     """
-    Convert position to cell number. If `pos` is in
-    `numpy.typecodes["AllInteger"]` assumes it to already be the cell
-    number.
-
-    Parameters
-    ----------
-    pos : 1-dimensional array
-        Array of positions along an axis in the box.
-    ncells : int
-        Number of cells along the axis.
-
-    Returns
-    -------
-    cells : 1-dimensional array
+    Convert position to cell number if there are `ncells` cells along the axis.
     """
     if pos.dtype.char in numpy.typecodes["AllInteger"]:
         return pos
@@ -684,17 +671,7 @@ def pos2cell(pos, ncells):
 def read_nshift(smooth_kwargs):
     """
     Determine the number of cells to pad the density field if smoothing is
-    applied. It defaults to the ceiling of three times the smoothing scale.
-
-    Parameters
-    ----------
-    smooth_kwargs : dict or None
-        Arguments to be passed to :py:func:`scipy.ndimage.gaussian_filter`.
-        If `None`, no smoothing is applied.
-
-    Returns
-    -------
-    nshift : int
+    applied. Defaults to the ceiling of three times the smoothing scale.
     """
     return 0 if smooth_kwargs is None else ceil(3 * smooth_kwargs["sigma"])
 
@@ -702,8 +679,7 @@ def read_nshift(smooth_kwargs):
 @jit(nopython=True)
 def fill_delta(delta, xcell, ycell, zcell, xmin, ymin, zmin, weights):
     """
-    Fill array `delta` by adding `weights` to the specified cells. This is a
-    JIT implementation.
+    Fill array `delta` by adding `weights` to the specified cells.
 
     Parameters
     ----------
@@ -730,8 +706,8 @@ def fill_delta(delta, xcell, ycell, zcell, xmin, ymin, zmin, weights):
 @jit(nopython=True)
 def fill_delta_indxs(delta, xcell, ycell, zcell, xmin, ymin, zmin, weights):
     """
-    Fill array `delta` by adding `weights` to the specified cells and return
-    indices where `delta` was assigned a value. This is a JIT implementation.
+    Fill array `delta` by adding `weights` to the specified cells. Returns
+    the indices where `delta` was assigned a value.
 
     Parameters
     ----------
@@ -1160,6 +1136,9 @@ def matching_max(cat0, catx, mass_kind, mult, periodic, overlap=None,
         hid0 = cat0["index"][i]
         out[i]["hid0"] = hid0
         out[i]["mass0"] = 10**mass0[i]
+
+        if not numpy.isfinite(rad0[i]):
+            continue
 
         neigh_dists, neigh_inds = knnx.radius_neighbors(pos0[i].reshape(1, -1),
                                                         mult * rad0[i])
