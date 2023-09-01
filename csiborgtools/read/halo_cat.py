@@ -24,16 +24,15 @@ from itertools import product
 from math import floor
 
 import numpy
-
 from readfof import FoF_catalog
 from sklearn.neighbors import NearestNeighbors
 
+from ..utils import (cartesian_to_radec, periodic_distance_two_points,
+                     radec_to_cartesian, real2redshift)
 from .box_units import CSiBORGBox, QuijoteBox
 from .paths import Paths
 from .readsim import CSiBORGReader
 from .utils import add_columns, cols_to_structured, flip_cols
-from ..utils import (periodic_distance_two_points, real2redshift,
-                     cartesian_to_radec, radec_to_cartesian)
 
 
 class BaseCatalogue(ABC):
@@ -43,6 +42,8 @@ class BaseCatalogue(ABC):
     _data = None
     _paths = None
     _nsim = None
+    _observer_location = None
+    _observer_velocity = None
 
     @property
     def nsim(self):
@@ -51,7 +52,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        nsim : int
+        int
         """
         if self._nsim is None:
             raise RuntimeError("`nsim` is not set!")
@@ -70,7 +71,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        nsnap : int
+        int
         """
         pass
 
@@ -81,7 +82,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        simname : str
+        str
         """
         pass
 
@@ -92,7 +93,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        paths : :py:class:`csiborgtools.read.Paths`
+        :py:class:`csiborgtools.read.Paths`
         """
         if self._paths is None:
             raise RuntimeError("`paths` is not set!")
@@ -110,7 +111,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        data : structured array
+        structured array
         """
         if self._data is None:
             raise RuntimeError("`data` is not set!")
@@ -123,7 +124,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        box : instance of :py:class:`csiborgtools.units.BoxUnits`
+        instance of :py:class:`csiborgtools.units.BoxUnits`
         """
         pass
 
@@ -142,7 +143,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        data : structured array
+        structured array
         """
         fits = numpy.load(paths.initmatch(self.nsim, simname, "fit"))
         X, cols = [], []
@@ -174,7 +175,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        data : structured array
+        structured array
         """
         fits = numpy.load(paths.structfit(self.nsnap, self.nsim, simname))
 
@@ -203,8 +204,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        data : structured array
-            The filtered data based on the provided bounds.
+        structured array
         """
         for key, (xmin, xmax) in bounds.items():
             if key == "dist":
@@ -229,7 +229,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-            obs_pos : 1-dimensional array of shape `(3,)`
+        1-dimensional array of shape `(3,)`
         """
         if self._observer_location is None:
             raise RuntimeError("`observer_location` is not set!")
@@ -241,6 +241,25 @@ class BaseCatalogue(ABC):
         obs_pos = numpy.asanyarray(obs_pos)
         assert obs_pos.shape == (3,)
         self._observer_location = obs_pos
+
+    @property
+    def observer_velocity(self):
+        r"""
+        Velocity of the observer in units :math:`\mathrm{km} / \mathrm{s}`.
+
+        Returns
+        1-dimensional array of shape `(3,)`
+        """
+        if self._observer_velocity is None:
+            raise RuntimeError("`observer_velocity` is not set!")
+        return self._observer_velocity
+
+    @observer_velocity.setter
+    def observer_velocity(self, obs_vel):
+        assert isinstance(obs_vel, (list, tuple, numpy.ndarray))
+        obs_vel = numpy.asanyarray(obs_vel)
+        assert obs_vel.shape == (3,)
+        self._observer_velocity = obs_vel
 
     def position(self, in_initial=False, cartesian=True,
                  subtract_observer=False):
@@ -261,8 +280,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        pos : ndarray, shape `(nobjects, 3)`
-            Position components.
+        ndarray, shape `(nobjects, 3)`
         """
         suffix = '0' if in_initial else ''
         component_keys = [f"{comp}{suffix}" for comp in ('x', 'y', 'z')]
@@ -285,7 +303,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        radial_distance : 1-dimensional array of shape `(nobjects,)`
+        1-dimensional array of shape `(nobjects,)`
         """
         pos = self.position(in_initial=in_initial, cartesian=True,
                             subtract_observer=True)
@@ -301,7 +319,7 @@ class BaseCatalogue(ABC):
         """
         return numpy.vstack([self["v{}".format(p)] for p in ("x", "y", "z")]).T
 
-    def redshift_space_position(self, cartesian=True, subtract_observer=False):
+    def redshift_space_position(self, cartesian=True):
         """
         Calculates the position of objects in redshift space. Positions can be
         returned  in either Cartesian coordinates (default) or spherical
@@ -318,14 +336,19 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        pos : 2-dimensional array of shape `(nobjects, 3)`
-            Position of objects in the desired coordinate system.
+        2-dimensional array of shape `(nobjects, 3)`
         """
-        # Force subtraction of observer if not in Cartesian coordinates
-        subtract_observer = subtract_observer or not cartesian
+        if self.simname == "quijote":
+            raise NotImplementedError("Redshift space positions not "
+                                      "implemented for Quijote.")
+
         rsp = real2redshift(self.position(cartesian=True), self.velocity(),
-                            self.observer_location, self.box, make_copy=False)
-        return rsp if cartesian else cartesian_to_radec(rsp)
+                            self.observer_location, self.observer_velocity,
+                            self.box, make_copy=False)
+        if cartesian:
+            return rsp
+
+        return cartesian_to_radec(rsp - self.observer_location)
 
     def angmomentum(self):
         """
@@ -334,7 +357,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        angmom : 2-dimensional array of shape `(nobjects, 3)`
+        2-dimensional array of shape `(nobjects, 3)`
         """
         return numpy.vstack([self["L{}".format(p)] for p in ("x", "y", "z")]).T
 
@@ -355,8 +378,7 @@ class BaseCatalogue(ABC):
 
         Returns
         -------
-        knn : :py:class:`sklearn.neighbors.NearestNeighbors`
-            kNN object fitted with object positions.
+        :py:class:`sklearn.neighbors.NearestNeighbors`
         """
         if subtract_observer and periodic:
             raise ValueError("Subtracting observer is not supported for "
@@ -533,8 +555,6 @@ class CSiBORGHaloCatalogue(BaseCatalogue):
         IC realisation index.
     paths : py:class`csiborgtools.read.Paths`
         Paths object.
-    observer_location : array, optional
-        Observer's location in :math:`\mathrm{Mpc} / h`.
     bounds : dict
         Parameter bounds; keys as names, values as (min, max) tuples. Use
         `dist` for radial distance, `None` for no bound.
@@ -544,14 +564,17 @@ class CSiBORGHaloCatalogue(BaseCatalogue):
         Load initial positions.
     with_lagpatch : bool, optional
         Load halos with a resolved Lagrangian patch.
+    observer_velocity : 1-dimensional array, optional
+        Observer's velocity in :math:`\mathrm{km} / \mathrm{s}`.
     """
 
-    def __init__(self, nsim, paths, observer_location=[338.85, 338.85, 338.85],
-                 bounds={"dist": (0, 155.5)},
-                 load_fitted=True, load_initial=True, with_lagpatch=False):
+    def __init__(self, nsim, paths, bounds={"dist": (0, 155.5)},
+                 load_fitted=True, load_initial=True, with_lagpatch=False,
+                 observer_velocity=None):
         self.nsim = nsim
         self.paths = paths
-        self.observer_location = observer_location
+        self.observer_location = [338.85, 338.85, 338.85]
+        self.observer_velocity = observer_velocity
         reader = CSiBORGReader(paths)
         data = reader.read_fof_halos(self.nsim)
         box = self.box
@@ -695,7 +718,7 @@ class QuijoteHaloCatalogue(BaseCatalogue):
 
         Returns
         -------
-        nsnap : int
+        int
         """
         return self._nsnap
 
@@ -715,7 +738,7 @@ class QuijoteHaloCatalogue(BaseCatalogue):
 
         Returns
         -------
-        redshift : float
+        float
         """
         return {4: 0.0, 3: 0.5, 2: 1.0, 1: 2.0, 0: 3.0}[self.nsnap]
 
@@ -737,7 +760,7 @@ class QuijoteHaloCatalogue(BaseCatalogue):
 
         Returns
         -------
-        cat : instance of csiborgtools.read.QuijoteHaloCatalogue
+        instance of `csiborgtools.read.QuijoteHaloCatalogue`
         """
         cat = deepcopy(self)
         cat.observer_location = fiducial_observers(self.box.boxsize, rmax)[n]

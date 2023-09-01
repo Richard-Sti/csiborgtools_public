@@ -37,22 +37,14 @@ except ModuleNotFoundError:
 def get_nsims(args, paths):
     """
     Get simulation indices from the command line arguments.
-
-    Parameters
-    ----------
-    args : argparse.Namespace
-        Command line arguments. Must include `nsims` and `simname`. If `nsims`
-        is `None` or `-1`, all simulations in `simname` are used.
-    paths : :py:class`csiborgtools.paths.Paths`
-        Paths object.
-
-    Returns
-    -------
-    nsims : list of int
-        Simulation indices.
     """
+    try:
+        from_quijote_backup = args.from_quijote_backup
+    except AttributeError:
+        from_quijote_backup = False
+
     if args.nsims is None or args.nsims[0] == -1:
-        nsims = paths.get_ics(args.simname, args.from_quijote_backup)
+        nsims = paths.get_ics(args.simname, from_quijote_backup)
     else:
         nsims = args.nsims
     return list(nsims)
@@ -81,8 +73,7 @@ def read_single_catalogue(args, config, nsim, run, rmax, paths, nobs=None):
 
     Returns
     -------
-    cat : csiborgtools.read.CSiBORGHaloCatalogue or csiborgtools.read.QuijoteHaloCatalogue  # noqa
-        Halo catalogue with selection criteria applied.
+    `csiborgtools.read.CSiBORGHaloCatalogue` or `csiborgtools.read.QuijoteHaloCatalogue`  # noqa
     """
     selection = config.get(run, None)
     if selection is None:

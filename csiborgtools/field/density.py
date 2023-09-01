@@ -111,7 +111,7 @@ class DensityField(BaseField):
 
         Returns
         -------
-        overdensity : 3-dimensional array of shape `(grid, grid, grid)`.
+        3-dimensional array of shape `(grid, grid, grid)`.
         """
         delta /= delta.mean()
         delta -= 1
@@ -140,8 +140,7 @@ class DensityField(BaseField):
 
         Returns
         -------
-        rho : 3-dimensional array of shape `(grid, grid, grid)`.
-            Density field.
+        3-dimensional array of shape `(grid, grid, grid)`.
 
         References
         ----------
@@ -154,7 +153,9 @@ class DensityField(BaseField):
         nparts = parts.shape[0]
         batch_size = nparts // nbatch
         start = 0
-        for __ in trange(nbatch + 1) if verbose else range(nbatch + 1):
+
+        for __ in trange(nbatch + 1, disable=not verbose,
+                         desc="Loading particles for the density field"):
             end = min(start + batch_size, nparts)
             pos = parts[start:end]
             pos, vel, mass = pos[:, :3], pos[:, 3:6], pos[:, 6]
@@ -170,6 +171,10 @@ class DensityField(BaseField):
             if end == nparts:
                 break
             start = end
+
+        # Divide by the cell volume in (kpc / h)^3
+        rho /= (self.box.boxsize / grid * 1e3)**3
+
         return rho
 
 
@@ -216,8 +221,7 @@ class VelocityField(BaseField):
 
         Returns
         -------
-        radvel : 3-dimensional array of shape `(grid, grid, grid)`.
-            Radial velocity field.
+        3-dimensional array of shape `(grid, grid, grid)`.
         """
         grid = rho_vel.shape[1]
         radvel = numpy.zeros((grid, grid, grid), dtype=numpy.float32)
@@ -261,8 +265,7 @@ class VelocityField(BaseField):
 
         Returns
         -------
-        rho_vel : 4-dimensional array of shape `(3, grid, grid, grid)`.
-            Velocity field along each axis.
+        4-dimensional array of shape `(3, grid, grid, grid)`.
 
         References
         ----------
@@ -341,7 +344,7 @@ class PotentialField(BaseField):
 
         Returns
         -------
-        potential : 3-dimensional array of shape `(grid, grid, grid)`.
+        3-dimensional array of shape `(grid, grid, grid)`.
         """
         return MASL.potential(overdensity_field, self.box._omega_m,
                               self.box._aexp, self.MAS)
@@ -383,19 +386,11 @@ class TidalTensorField(BaseField):
 
         Returns
         -------
-        eigvals : 3-dimensional array of shape `(grid, grid, grid)`
+        3-dimensional array of shape `(grid, grid, grid)`
         """
-        grid = tidal_tensor.T00.shape[0]
-        eigvals = numpy.full((grid, grid, grid, 3), numpy.nan,
-                             dtype=numpy.float32)
-        dummy_vector = numpy.full(3, numpy.nan, dtype=numpy.float32)
-        dummy_tensor = numpy.full((3, 3), numpy.nan, dtype=numpy.float32)
-
-        tidal_tensor_to_eigenvalues(eigvals, dummy_vector, dummy_tensor,
-                                    tidal_tensor.T00, tidal_tensor.T01,
-                                    tidal_tensor.T02, tidal_tensor.T11,
-                                    tidal_tensor.T12, tidal_tensor.T22)
-        return eigvals
+        return tidal_tensor_to_eigenvalues(
+            tidal_tensor.T00, tidal_tensor.T01, tidal_tensor.T02,
+            tidal_tensor.T11, tidal_tensor.T12, tidal_tensor.T22)
 
     @staticmethod
     def eigvals_to_environment(eigvals, threshold=0.0):
@@ -410,14 +405,11 @@ class TidalTensorField(BaseField):
 
         Returns
         -------
-        environment : 3-dimensional array of shape `(grid, grid, grid)`
+        3-dimensional array of shape `(grid, grid, grid)`
             The environment of each grid cell. Possible values are 0 (void),
             1 (sheet), 2 (filament), 3 (knot).
         """
-        environment = numpy.full(eigvals.shape[:-1], numpy.nan,
-                                 dtype=numpy.float32)
-        eigenvalues_to_environment(environment, eigvals, threshold)
-        return environment
+        return eigenvalues_to_environment(eigvals, threshold)
 
     def __call__(self, overdensity_field):
         """
@@ -430,7 +422,7 @@ class TidalTensorField(BaseField):
 
         Returns
         -------
-        tidal_tensor : :py:class:`MAS_library.tidal_tensor`
+        :py:class:`MAS_library.tidal_tensor`
             Tidal tensor object, whose attributes `tidal_tensor.Tij` contain
             the relevant tensor components.
         """
@@ -439,38 +431,25 @@ class TidalTensorField(BaseField):
 
 
 @jit(nopython=True)
-def tidal_tensor_to_eigenvalues(eigvals, dummy_vector, dummy_tensor,
-                                T00, T01, T02, T11, T12, T22):
+def tidal_tensor_to_eigenvalues(T00, T01, T02, T11, T12, T22):
     """
     Calculate eigenvalues of the tidal tensor field, sorted in decreasing
-    absolute value order. JIT implementation to speed up the work.
+    absolute value order.
 
     Parameters
     ----------
-    eigvals : 3-dimensional array of shape `(grid, grid, grid)`
-        Array to store the eigenvalues.
-    dummy_vector : 1-dimensional array of shape `(3,)`
-        Dummy vector to store the eigenvalues.
-    dummy_tensor : 2-dimensional array of shape `(3, 3)`
-        Dummy tensor to store the tidal tensor.
-    T00 : 3-dimensional array of shape `(grid, grid, grid)`
-        Tidal tensor component :math:`T_{00}`.
-    T01 : 3-dimensional array of shape `(grid, grid, grid)`
-        Tidal tensor component :math:`T_{01}`.
-    T02 : 3-dimensional array of shape `(grid, grid, grid)`
-        Tidal tensor component :math:`T_{02}`.
-    T11 : 3-dimensional array of shape `(grid, grid, grid)`
-        Tidal tensor component :math:`T_{11}`.
-    T12 : 3-dimensional array of shape `(grid, grid, grid)`
-        Tidal tensor component :math:`T_{12}`.
-    T22 : 3-dimensional array of shape `(grid, grid, grid)`
-        Tidal tensor component :math:`T_{22}`.
+    T00, T01, T02, T11, T12, T22 : 3-dimensional array `(grid, grid, grid)`
+        Tidal tensor components.
 
     Returns
     -------
-    eigvals : 3-dimensional array of shape `(grid, grid, grid)`
+    3-dimensional array of shape `(grid, grid, grid)`
     """
     grid = T00.shape[0]
+    eigvals = numpy.full((grid, grid, grid, 3), numpy.nan, dtype=numpy.float32)
+    dummy_vector = numpy.full(3, numpy.nan, dtype=numpy.float32)
+    dummy_tensor = numpy.full((3, 3), numpy.nan, dtype=numpy.float32)
+
     for i in range(grid):
         for j in range(grid):
             for k in range(grid):
@@ -494,15 +473,13 @@ def tidal_tensor_to_eigenvalues(eigvals, dummy_vector, dummy_tensor,
 
 
 @jit(nopython=True)
-def eigenvalues_to_environment(environment, eigvals, th):
+def eigenvalues_to_environment(eigvals, th):
     """
     Classify the environment of each grid cell based on the eigenvalues of the
     tidal tensor field.
 
     Parameters
     ----------
-    environment : 3-dimensional array of shape `(grid, grid, grid)`
-        Array to store the environment.
     eigvals : 4-dimensional array of shape `(grid, grid, grid, 3)`
         The eigenvalues of the tidal tensor field.
     th : float
@@ -510,19 +487,21 @@ def eigenvalues_to_environment(environment, eigvals, th):
 
     Returns
     -------
-    environment : 3-dimensional array of shape `(grid, grid, grid)`
+    3-dimensional array of shape `(grid, grid, grid)`
     """
+    env = numpy.full(eigvals.shape[:-1], numpy.nan, dtype=numpy.float32)
+
     grid = eigvals.shape[0]
     for i in range(grid):
         for j in range(grid):
             for k in range(grid):
                 lmbda1, lmbda2, lmbda3 = eigvals[i, j, k, :]
                 if lmbda1 < th and lmbda2 < th and lmbda3 < th:
-                    environment[i, j, k] = 0
+                    env[i, j, k] = 0
                 elif lmbda1 < th and lmbda2 < th:
-                    environment[i, j, k] = 1
+                    env[i, j, k] = 1
                 elif lmbda1 < th:
-                    environment[i, j, k] = 2
+                    env[i, j, k] = 2
                 else:
-                    environment[i, j, k] = 3
-    return environment
+                    env[i, j, k] = 3
+    return env

@@ -38,15 +38,6 @@ except ModuleNotFoundError:
 def open_csiborg(nsim):
     """
     Open a CSiBORG halo catalogue. Applies mass and distance selection.
-
-    Parameters
-    ----------
-    nsim : int
-        Simulation index.
-
-    Returns
-    -------
-    cat : csiborgtools.read.CSiBORGHaloCatalogue
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     bounds = {"totpartmass": (None, None), "dist": (0, 155)}
@@ -58,17 +49,6 @@ def open_csiborg(nsim):
 def open_quijote(nsim, nobs=None):
     """
     Open a Quijote halo catalogue. Applies mass and distance selection.
-
-    Parameters
-    ----------
-    nsim : int
-        Simulation index.
-    nobs : int, optional
-        Fiducial observer index.
-
-    Returns
-    -------
-    cat : csiborgtools.read.QuijoteHaloCatalogue
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     cat = csiborgtools.read.QuijoteHaloCatalogue(
@@ -82,17 +62,6 @@ def open_quijote(nsim, nobs=None):
 def plot_mass_vs_ncells(nsim, pdf=False):
     """
     Plot the halo mass vs. number of occupied cells in the initial snapshot.
-
-    Parameters
-    ----------
-    nsim : int
-        Simulation index.
-    pdf : bool, optional
-        Whether to save the figure as a PDF file.
-
-    Returns
-    -------
-    None
     """
     cat = open_csiborg(nsim)
     mpart = 4.38304044e+09
@@ -123,15 +92,6 @@ def plot_mass_vs_ncells(nsim, pdf=False):
 def plot_hmf(pdf=False):
     """
     Plot the FoF halo mass function of CSiBORG and Quijote.
-
-    Parameters
-    ----------
-    pdf : bool, optional
-        Whether to save the figure as a PDF file.
-
-    Returns
-    -------
-    None
     """
     print("Plotting the HMF...", flush=True)
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
@@ -189,13 +149,15 @@ def plot_hmf(pdf=False):
         std_csiborg = numpy.std(csiborg_counts, axis=0)
         ax[0].plot(x, mean_csiborg, label="CSiBORG", c=cols[0])
         ax[0].fill_between(x, mean_csiborg - std_csiborg,
-                           mean_csiborg + std_csiborg, alpha=0.5, color=cols[0])
+                           mean_csiborg + std_csiborg,
+                           alpha=0.5, color=cols[0])
 
         mean_quijote = numpy.mean(quijote_counts, axis=0)
         std_quijote = numpy.std(quijote_counts, axis=0)
         ax[0].plot(x, mean_quijote, label="Quijote", c=cols[1])
         ax[0].fill_between(x, mean_quijote - std_quijote,
-                           mean_quijote + std_quijote, alpha=0.5, color=cols[1])
+                           mean_quijote + std_quijote, alpha=0.5,
+                           color=cols[1])
 
         ax[0].plot(x, csiborg5511, label="CSiBORG 5511", c="k", ls="--")
         std5511 = numpy.sqrt(csiborg5511)
@@ -207,7 +169,7 @@ def plot_hmf(pdf=False):
                          + (std_quijote / mean_quijote / numpy.log(10))**2)
         ax[1].plot(x, 10**log_y, c=cols[0])
         ax[1].fill_between(x, 10**(log_y - err), 10**(log_y + err), alpha=0.5,
-                           color=col[0])
+                           color=cols[0])
 
         ax[1].plot(x, csiborg5511 / mean_quijote, c="k", ls="--")
 
@@ -238,11 +200,6 @@ def plot_hmf(pdf=False):
 def plot_hmf_quijote_full(pdf=False):
     """
     Plot the FoF halo mass function of Quijote full run.
-
-    Parameters
-    ----------
-    pdf : bool, optional
-        Whether to save the figure as a PDF file.
 
     Returns
     -------
@@ -305,29 +262,13 @@ def plot_hmf_quijote_full(pdf=False):
         plt.close()
 
 
-def load_field(kind, nsim, grid, MAS, in_rsp=False):
+def load_field(kind, nsim, grid, MAS, in_rsp=False, smooth_scale=None):
     r"""
     Load a single field.
-
-    Parameters
-    ----------
-    kind : str
-        Field kind.
-    nsim : int
-        Simulation index.
-    grid : int
-        Grid size.
-    MAS : str
-        Mass assignment scheme.
-    in_rsp : bool, optional
-        Whether to load the field in redshift space.
-
-    Returns
-    -------
-    field : n-dimensional array
     """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=in_rsp))
+    return numpy.load(paths.field(kind, MAS, grid, nsim, in_rsp=in_rsp,
+                                  smooth_scale=smooth_scale))
 
 
 ###############################################################################
@@ -338,35 +279,8 @@ def load_field(kind, nsim, grid, MAS, in_rsp=False):
 def plot_projected_field(kind, nsim, grid, in_rsp, smooth_scale, MAS="PCS",
                          vel_component=0, highres_only=True, slice_find=None,
                          pdf=False):
-    r"""
+    """
     Plot the mean projected field, however can also plot a single slice.
-
-    Parameters
-    ----------
-    kind : str
-        Field kind.
-    nsim : int
-        Simulation index.
-    grid : int
-        Grid size.
-    in_rsp : bool
-        Whether to load the field in redshift space.
-    smooth_scale : float
-        Smoothing scale in :math:`\mathrm{Mpc} / h`.
-    MAS : str, optional
-        Mass assignment scheme.
-    vel_component : int, optional
-        Which velocity field component to plot.
-    highres_only : bool, optional
-        Whether to only plot the high-resolution region.
-    slice_find : float, optional
-        Which slice to plot in fractional units (i.e. 1. is the last slice)
-    pdf : bool, optional
-        Whether to save the figure as a PDF.
-
-    Returns
-    -------
-    None
     """
     print(f"Plotting projected field `{kind}`. ", flush=True)
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
@@ -383,7 +297,8 @@ def plot_projected_field(kind, nsim, grid, in_rsp, smooth_scale, MAS="PCS",
         field = File(paths.borg_mcmc(nsim), 'r')
         field = field["scalars"]["BORG_final_density"][...]
     else:
-        field = load_field(kind, nsim, grid, MAS=MAS, in_rsp=in_rsp)
+        field = load_field(kind, nsim, grid, MAS=MAS, in_rsp=in_rsp,
+                           smooth_scale=smooth_scale)
 
     if kind == "velocity":
         field = field[vel_component, ...]
@@ -487,7 +402,6 @@ def plot_projected_field(kind, nsim, grid, in_rsp, smooth_scale, MAS="PCS",
         else:
             fig.colorbar(im, cax=cbar_ax, label=clabel)
 
-
         fig.tight_layout(h_pad=0, w_pad=0)
         for ext in ["png"] if pdf is False else ["png", "pdf"]:
             fout = join(
@@ -506,20 +420,9 @@ def plot_projected_field(kind, nsim, grid, in_rsp, smooth_scale, MAS="PCS",
 ###############################################################################
 
 
-def get_sky_label(kind, volume_weight):
+def get_sky_label(kind, volume_weight: bool):
     """
     Get the sky label for a given field kind.
-
-    Parameters
-    ----------
-    kind : str
-        Field kind.
-    volume_weight : bool
-        Whether to volume weight the field.
-
-    Returns
-    -------
-    label : str
     """
     if volume_weight:
         if kind == "density":
@@ -667,14 +570,16 @@ if __name__ == "__main__":
                               plot_halos=5e13, volume_weight=True)
 
     if True:
-        kind = "potential"
+        kind = "environment"
         grid = 512
-        smooth_scale = 0
+        smooth_scale = 8.0
         # plot_projected_field("overdensity", 7444, grid, in_rsp=True,
         #                      highres_only=False)
-        # for in_rsp in [True, False]:
-        for in_rsp in [True, False]:
-            plot_projected_field(kind, 7444, grid, in_rsp=in_rsp,
+        # nsims = [7444 + n * 24 for n in range(101)]
+        nsim = 7444
+
+        for in_rsp in [False]:
+            plot_projected_field(kind, nsim, grid, in_rsp=in_rsp,
                                  smooth_scale=smooth_scale, slice_find=0.5,
                                  MAS="PCS", highres_only=True)
 
