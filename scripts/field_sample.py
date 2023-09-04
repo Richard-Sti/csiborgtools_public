@@ -119,7 +119,7 @@ def evaluate_field(field, pos, nrand, smooth_scales=None, seed=42,
             continue
 
         for j in range(nrand):
-            gen = numpy.random.default_rng(seed)
+            gen = numpy.random.default_rng(seed + j)
             pos_rand = numpy.vstack([
                 gen.permutation(pos[:, 0]),
                 gen.uniform(0, 360, nsample),
