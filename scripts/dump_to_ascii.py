@@ -75,14 +75,14 @@ def extract_positions(nsim, paths, kind):
     fpath = paths.observer_peculiar_velocity("PCS", 512, nsim)
     vpec_observer = numpy.load(fpath)["observer_vp"][0, :]
     cat = csiborgtools.read.CSiBORGHaloCatalogue(
-        nsim, paths, load_fitted=True, load_initial=False,
-        observer_velocity=vpec_observer)
+        nsim, paths, bounds={"dist": (0, 155.5)}, load_fitted=True,
+        load_initial=False, observer_velocity=vpec_observer, )
 
     if kind == "halos":
-        return cat.position()
+        return cat.position() - 677.7 / 2
 
     if kind == "halos_rsp":
-        return cat.redshift_space_position()
+        return cat.redshift_space_position() - 677.7 / 2
 
     raise ValueError(f"Unknown kind `{kind}`. Allowed values are: "
                      "`particles`, `particles_rsp`, `halos`, `halos_rsp`.")
@@ -113,4 +113,4 @@ if __name__ == "__main__":
     def _main(nsim):
         main(nsim, paths, args.kind)
 
-    work_delegation(main, nsims, MPI.COMM_WORLD)
+    work_delegation(_main, nsims, MPI.COMM_WORLD)
