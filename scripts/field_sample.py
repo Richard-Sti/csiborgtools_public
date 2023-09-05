@@ -189,6 +189,12 @@ if __name__ == "__main__":
 
     pos, indxs = open_galaxy_positions(args.survey, MPI.COMM_WORLD)
 
+    if MPI.COMM_WORLD.Get_rank() == 0 and args.survey != "GW170817":
+        fout = f"/mnt/extraspace/rstiskalek/CSiBORG/ascii_positions/{args.survey}_positions.npz"  # noqa
+        pos = csiborgtools.utils.radec_to_cartesian(pos) + 677.7 / 2
+        print(f"Saving to ... `{fout}`.")
+        numpy.savez(fout, pos=pos, indxs=indxs)
+
     def _main(nsim):
         main(nsim, args, pos, indxs, paths,
              verbose=MPI.COMM_WORLD.Get_size() == 1)
