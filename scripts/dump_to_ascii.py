@@ -79,10 +79,10 @@ def extract_positions(nsim, paths, kind):
         load_initial=False, observer_velocity=vpec_observer, )
 
     if kind == "halos":
-        return cat.position() - 677.7 / 2
+        return cat.position()
 
     if kind == "halos_rsp":
-        return cat.redshift_space_position() - 677.7 / 2
+        return cat.redshift_space_position()
 
     raise ValueError(f"Unknown kind `{kind}`. Allowed values are: "
                      "`particles`, `particles_rsp`, `halos`, `halos_rsp`.")
