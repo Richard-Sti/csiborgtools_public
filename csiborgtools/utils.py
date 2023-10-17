@@ -150,6 +150,35 @@ def radec_to_cartesian(X):
         ]).T
 
 
+def cosine_similarity(x, y):
+    r"""
+    Calculate the cosine similarity between two Cartesian vectors. Defined
+    as :math:`\Sum_{i} x_i y_{i} / (|x| * |y|)`.
+
+    Parameters
+    ----------
+    x : 1-dimensional array
+        The first vector.
+    y : 1- or 2-dimensional array
+        The second vector. Can be 2-dimensional of shape `(n_samples, 3)`,
+        in which case the calculation is broadcasted.
+
+    Returns
+    -------
+    out : float or 1-dimensional array
+    """
+    if x.ndim != 1:
+        raise ValueError("`x` must be a 1-dimensional array.")
+
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+
+    out = numpy.sum(x * y, axis=1)
+    out /= numpy.linalg.norm(x) * numpy.linalg.norm(y, axis=1)
+
+    return out[0] if out.size == 1 else out
+
+
 def real2redshift(pos, vel, observer_location, observer_velocity, box,
                   periodic_wrap=True, make_copy=True):
     r"""
@@ -218,4 +247,18 @@ def number_counts(x, bin_edges):
     out = numpy.full(bin_edges.size - 1, numpy.nan, dtype=numpy.float32)
     for i in range(bin_edges.size - 1):
         out[i] = numpy.sum((x >= bin_edges[i]) & (x < bin_edges[i + 1]))
+    return out
+
+
+def binned_statistic(x, y, left_edges, bin_width, statistic):
+    """
+    Calculate a binned statistic.
+    """
+    out = numpy.full(left_edges.size, numpy.nan, dtype=x.dtype)
+
+    for i in range(left_edges.size):
+        mask = (x >= left_edges[i]) & (x < left_edges[i] + bin_width)
+
+        if numpy.any(mask):
+            out[i] = statistic(y[mask])
     return out
