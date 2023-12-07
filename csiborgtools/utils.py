@@ -15,6 +15,7 @@
 """Collection of stand-off utility functions used in the scripts."""
 import numpy
 from numba import jit
+from datetime import datetime
 
 ###############################################################################
 #                           Positions                                         #
@@ -87,7 +88,7 @@ def periodic_distance_two_points(p1, p2, boxsize):
     return dist**0.5
 
 
-@jit(nopython=True)
+@jit(nopython=True, boundscheck=False)
 def periodic_wrap_grid(pos, boxsize=1):
     """Wrap positions in a periodic box."""
     for n in range(pos.shape[0]):
@@ -139,15 +140,32 @@ def radec_to_cartesian(X):
     """
     dist, ra, dec = X[:, 0], X[:, 1], X[:, 2]
 
-    ra *= numpy.pi / 180
-    dec *= numpy.pi / 180
-    cdec = numpy.cos(dec)
-
+    cdec = numpy.cos(dec * numpy.pi / 180)
     return numpy.vstack([
-        dist * cdec * numpy.cos(ra),
-        dist * cdec * numpy.sin(ra),
-        dist * numpy.sin(dec)
+        dist * cdec * numpy.cos(ra * numpy.pi / 180),
+        dist * cdec * numpy.sin(ra * numpy.pi / 180),
+        dist * numpy.sin(dec * numpy.pi / 180)
         ]).T
+
+
+@jit(nopython=True, fastmath=True, boundscheck=False)
+def great_circle_distance(x1, x2):
+    """
+    Great circle distance between two points on a sphere, defined by RA and
+    dec, both in degrees.
+    """
+    ra1, dec1 = x1
+    ra2, dec2 = x2
+
+    ra1 *= numpy.pi / 180
+    dec1 *= numpy.pi / 180
+    ra2 *= numpy.pi / 180
+    dec2 *= numpy.pi / 180
+
+    return 180 / numpy.pi * numpy.arccos(
+        numpy.sin(dec1) * numpy.sin(dec2)
+        + numpy.cos(dec1) * numpy.cos(dec2) * numpy.cos(ra1 - ra2)
+        )
 
 
 def cosine_similarity(x, y):
@@ -177,6 +195,36 @@ def cosine_similarity(x, y):
     out /= numpy.linalg.norm(x) * numpy.linalg.norm(y, axis=1)
 
     return out[0] if out.size == 1 else out
+
+
+def hms_to_degrees(hours, minutes=None, seconds=None):
+    """
+    Convert hours, minutes and seconds to degrees.
+
+    Parameters
+    ----------
+    hours, minutes, seconds : float
+
+    Returns
+    -------
+    float
+    """
+    return hours * 15 + (minutes or 0) / 60 * 15 + (seconds or 0) / 3600 * 15
+
+
+def dms_to_degrees(degrees, arcminutes=None, arcseconds=None):
+    """
+    Convert degrees, arcminutes and arcseconds to decimal degrees.
+
+    Parameters
+    ----------
+    degrees, arcminutes, arcseconds : float
+
+    Returns
+    -------
+    float
+    """
+    return degrees + (arcminutes or 0) / 60 + (arcseconds or 0) / 3600
 
 
 def real2redshift(pos, vel, observer_location, observer_velocity, box,
@@ -262,3 +310,9 @@ def binned_statistic(x, y, left_edges, bin_width, statistic):
         if numpy.any(mask):
             out[i] = statistic(y[mask])
     return out
+
+
+def fprint(msg, verbose=True):
+    """Print and flush a message with a timestamp."""
+    if verbose:
+        print(f"{datetime.now()}:   {msg}", flush=True)

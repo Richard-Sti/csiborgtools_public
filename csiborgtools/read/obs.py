@@ -383,6 +383,9 @@ class FitsSurvey(ABC):
             return out
         return out[self.selection_mask]
 
+    def __len__(self):
+        return self.size
+
 
 ###############################################################################
 #                            Planck clusters                                  #
@@ -560,8 +563,7 @@ class SDSS(FitsSurvey):
     Parameters
     ----------
     fpath : str, optional
-        Path to the FITS file. By default
-        `/mnt/extraspace/rstiskalek/catalogs/nsa_v1_0_1.fits`.
+        Path to the FITS file.
     h : float, optional
         Little h. By default `h = 1`. The catalogue assumes this value.
         The routine properties should take care of little h conversion.
@@ -581,9 +583,7 @@ class SDSS(FitsSurvey):
     """
     name = "SDSS"
 
-    def __init__(self, fpath=None, h=1, Om0=0.3175, sel_steps=None):
-        if fpath is None:
-            fpath = "/mnt/extraspace/rstiskalek/catalogs/nsa_v1_0_1.fits"
+    def __init__(self, fpath, h=1, Om0=0.3175, sel_steps=None):
         self._file = fits.open(fpath, memmap=False)
         self.h = h
 
@@ -719,3 +719,114 @@ class SDSS(FitsSurvey):
         Get `IN_DR7_LSS` and turn to a boolean array.
         """
         return self.get_fitsitem("IN_DR7_LSS").astype(bool)
+
+
+###############################################################################
+#                           Individual observations                           #
+###############################################################################
+
+
+class BaseSingleObservation(ABC):
+    """
+    Base class to hold information about a single object.
+    """
+    def __init__(self):
+        self._spherical_pos = None
+        self._name = None
+
+    @property
+    def spherical_pos(self):
+        """
+        Spherical position of the observation in dist/RA/dec in Mpc / h and
+        degrees, respectively.
+
+        Returns
+        -------
+        1-dimensional array of shape (3,)
+        """
+        if self._spherical_pos is None:
+            raise ValueError("`spherical_pos` is not set!")
+        return self._spherical_pos
+
+    @spherical_pos.setter
+    def spherical_pos(self, pos):
+        if isinstance(pos, (list, tuple)):
+            pos = numpy.array(pos)
+
+        if not pos.shape == (3,):
+            raise ValueError("`spherical_pos` must be a of shape (3,).")
+
+        self._spherical_pos = pos
+
+    @property
+    def name(self):
+        """
+        Observated object name.
+
+        Returns
+        -------
+        str
+        """
+        if self._name is None:
+            raise ValueError("`name` is not set!")
+        return self._name
+
+    @name.setter
+    def name(self, name):
+        if not isinstance(name, str):
+            raise ValueError("`name` must be a string.")
+        self._name = name
+
+
+class ObservedCluster(BaseSingleObservation):
+    """
+    Class to hold information about an observed cluster.
+
+    Parameters
+    ----------
+    RA : float
+        Right ascension in degrees.
+    dec : float
+        Declination in degrees.
+    dist : float
+        Distance in Mpc / h.
+    name : str
+        Cluster name.
+    """
+    def __init__(self, RA, dec, dist, name):
+        super().__init__()
+        self.name = name
+        self.spherical_pos = [dist, RA, dec]
+
+
+###############################################################################
+#                           Utility functions                                 #
+###############################################################################
+
+def match_array_to_no_masking(arr, surv):
+    """
+    Match an array to a survey without masking.
+
+    Parameters
+    ----------
+    arr : n-dimensional array
+        Array to match.
+    surv : survey class
+        Survey class.
+
+    Returns
+    -------
+    out : n-dimensional array
+    """
+    dtype = arr.dtype
+    if arr.ndim > 1:
+        shape = arr.shape
+        out = numpy.full((surv.selection_mask.size, *shape[1:]), numpy.nan,
+                         dtype=dtype)
+    else:
+        out = numpy.full(surv.selection_mask.size, numpy.nan, dtype=dtype)
+
+    for i, indx in enumerate(surv["INDEX"]):
+        out[indx] = arr[i]
+
+    return out

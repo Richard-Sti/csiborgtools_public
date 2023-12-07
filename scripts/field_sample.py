@@ -53,12 +53,20 @@ def open_galaxy_positions(survey_name, comm):
 
     if rank == 0:
         if survey_name == "SDSS":
-            survey = csiborgtools.read.SDSS(
-                h=1, sel_steps=lambda cls: steps(cls, survey_name))
+            survey = csiborgtools.SDSS()()
             pos = numpy.vstack([survey["DIST_UNCORRECTED"],
                                 survey["RA"],
                                 survey["DEC"]],
                                ).T
+            pos = pos.astype(numpy.float32)
+            indxs = survey["INDEX"]
+        if survey_name == "SDSSxALFALFA":
+            survey = csiborgtools.SDSSxALFALFA()()
+            pos = numpy.vstack([survey["DIST_UNCORRECTED"],
+                                survey["RA_1"],
+                                survey["DEC_1"]],
+                               ).T
+            pos = pos.astype(numpy.float32)
             indxs = survey["INDEX"]
         elif survey_name == "GW170817":
             samples = File("/mnt/extraspace/rstiskalek/GWLSS/H1L1V1-EXTRACT_POSTERIOR_GW170817-1187008600-400.hdf", 'r')["samples"]  # noqa
@@ -110,7 +118,7 @@ def evaluate_field(field, pos, nrand, smooth_scales=None, seed=42,
             field_smoothed = csiborgtools.field.smoothen_field(
                 field, scale * MPC2BOX, boxsize=1, make_copy=True)
         else:
-            field_smoothed = field
+            field_smoothed = numpy.copy(field)
 
         val[:, i] = csiborgtools.field.evaluate_sky(
             field_smoothed, pos=pos, mpc2box=MPC2BOX)
@@ -164,7 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--nsims", type=int, nargs="+", default=None,
                         help="IC realisations. If `-1` processes all.")
     parser.add_argument("--survey", type=str, required=True,
-                        choices=["SDSS", "GW170817"],
+                        choices=["SDSS", "SDSSxALFALFA", "GW170817"],
                         help="Galaxy survey")
     parser.add_argument("--smooth_scales", type=float, nargs="+", default=None,
                         help="Smoothing scales in Mpc / h.")
@@ -188,12 +196,6 @@ if __name__ == "__main__":
     nsims = get_nsims(args, paths)
 
     pos, indxs = open_galaxy_positions(args.survey, MPI.COMM_WORLD)
-
-    if MPI.COMM_WORLD.Get_rank() == 0 and args.survey != "GW170817":
-        fout = f"/mnt/extraspace/rstiskalek/CSiBORG/ascii_positions/{args.survey}_positions.npz"  # noqa
-        pos = csiborgtools.utils.radec_to_cartesian(pos) + 677.7 / 2
-        print(f"Saving to ... `{fout}`.")
-        numpy.savez(fout, pos=pos, indxs=indxs)
 
     def _main(nsim):
         main(nsim, args, pos, indxs, paths,

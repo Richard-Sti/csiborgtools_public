@@ -12,7 +12,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 r"""
-Script to load in the simulation particles, sort them by their FoF halo ID and
+Script to load in the simulation particles, sort them by their halo ID and
 dump into a HDF5 file. Stores the first and last index of each halo in the
 particle array. This can be used for fast slicing of the array to acces
 particles of a single clump.
@@ -108,7 +108,7 @@ def main(nsim, simname, verbose):
         pars_extract = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'M', "ID"]
     else:
         pars_extract = None
-    parts, pids = partreader.read_particle(
+    parts, pids = partreader.read_snapshot(
         nsnap, nsim, pars_extract, return_structured=False, verbose=verbose)
 
     # In case of CSiBORG, we need to convert the mass and velocities from

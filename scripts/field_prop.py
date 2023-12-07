@@ -28,6 +28,16 @@ from taskmaster import work_delegation
 import csiborgtools
 from utils import get_nsims
 
+
+###############################################################################
+#                   Cosmotool SPH density & velocity field                    #
+###############################################################################
+
+def cosmotool_sph(nsim, parser_args):
+    pass
+
+
+
 ###############################################################################
 #                            Density field                                    #
 ###############################################################################
@@ -40,13 +50,15 @@ def density_field(nsim, parser_args, to_save=True):
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsnap = max(paths.get_snapshots(nsim, "csiborg"))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
+    fname = paths.processed_output(nsim, "csiborg", "halo_catalogue")
 
     if not parser_args.in_rsp:
-        parts = csiborgtools.read.read_h5(paths.particles(nsim, "csiborg"))
-        parts = parts["particles"]
+        snap = csiborgtools.read.read_h5(fname)["snapshot_final"]
+        pos = snap["pos"]
+        mass = snap["mass"]
 
         gen = csiborgtools.field.DensityField(box, parser_args.MAS)
-        field = gen(parts, parser_args.grid, verbose=parser_args.verbose)
+        field = gen(pos, mass, parser_args.grid, verbose=parser_args.verbose)
     else:
         field = numpy.load(paths.field(
             "density", parser_args.MAS, parser_args.grid, nsim, False))
@@ -83,12 +95,15 @@ def velocity_field(nsim, parser_args, to_save=True):
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsnap = max(paths.get_snapshots(nsim, "csiborg"))
     box = csiborgtools.read.CSiBORGBox(nsnap, nsim, paths)
+    fname = paths.processed_output(nsim, "csiborg", "halo_catalogue")
 
-    parts = csiborgtools.read.read_h5(paths.particles(nsim, "csiborg"))
-    parts = parts["particles"]
+    snap = csiborgtools.read.read_h5(fname)["snapshot_final"]
+    pos = snap["pos"]
+    vel = snap["vel"]
+    mass = snap["mass"]
 
     gen = csiborgtools.field.VelocityField(box, parser_args.MAS)
-    field = gen(parts, parser_args.grid, verbose=parser_args.verbose)
+    field = gen(pos, vel, mass, parser_args.grid, verbose=parser_args.verbose)
 
     if to_save:
         fout = paths.field("velocity", parser_args.MAS, parser_args.grid,
@@ -247,6 +262,7 @@ if __name__ == "__main__":
     parser.add_argument("--verbose", type=lambda x: bool(strtobool(x)),
                         help="Verbosity flag for reading in particles.")
     parser.add_argument("--simname", type=str, default="csiborg",
+                        choices=["csiborg", "csiborg2"],
                         help="Verbosity flag for reading in particles.")
     parser_args = parser.parse_args()
     comm = MPI.COMM_WORLD

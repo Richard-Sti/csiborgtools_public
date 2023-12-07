@@ -67,14 +67,13 @@ def sort_particle_membership(nsim, nsnap, method):
     fout = fpath + "_sorted.hdf5"
     print(f"{datetime.now()}:   saving the sorted data to ... `{fout}`")
 
-    header = """
-    This dataset represents halo indices for each particle.
-        - The particles are ordered as they appear in the simulation snapshot.
-        - Unassigned particles are given a halo index of 0.
-        """
     with h5py.File(fout, 'w') as hdf:
-        dset = hdf.create_dataset('hids_dataset', data=hids)
-        dset.attrs['header'] = header
+        dset = hdf.create_dataset('hids', data=hids)
+        dset.attrs['header'] = """
+        This dataset represents (sub)halo indices for each particle.
+        - The particles are ordered as they appear in the simulation snapshot.
+        - Unassigned particles are given an index of 0.
+        """
 
 
 if __name__ == "__main__":

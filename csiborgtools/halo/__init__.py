@@ -1,4 +1,4 @@
-# Copyright (C) 2022 Richard Stiskalek
+# Copyright (C) 2023 Richard Stiskalek
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation; either version 3 of the License, or (at your
@@ -12,5 +12,5 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-from .match import (ParticleOverlap, RealisationsMatcher, calculate_overlap,    # noqa
-                    pos2cell, find_neighbour, matching_max)                     # noqa
+
+from .prop import density_profile                                               # noqa

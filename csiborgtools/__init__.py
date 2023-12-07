@@ -12,12 +12,12 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-from csiborgtools import clustering, field, match, read, summary                 # noqa
+from csiborgtools import clustering, field, halo, match, read, summary          # noqa
 
-from .utils import (center_of_mass, delta2ncells, number_counts,                 # noqa
-                    periodic_distance, periodic_distance_two_points,             # noqa
-                    binned_statistic, cosine_similarity)                         # noqa
-
+from .utils import (center_of_mass, delta2ncells, number_counts,                # noqa
+                    periodic_distance, periodic_distance_two_points,            # noqa
+                    binned_statistic, cosine_similarity, fprint,                # noqa
+                    hms_to_degrees, dms_to_degrees, great_circle_distance)      # noqa
 
 # Arguments to csiborgtools.read.Paths.
 paths_glamdring = {"srcdir": "/mnt/extraspace/hdesmond/",
@@ -46,5 +46,34 @@ class SDSS:
                 (lambda x: cls[x] < 155, ("DIST", ))
                 ]
 
-    def __call__(self):
-        return read.SDSS(h=1, sel_steps=self.steps)
+    def __call__(self, fpath=None, apply_selection=True):
+        if fpath is None:
+            fpath = "/mnt/extraspace/rstiskalek/catalogs/nsa_v1_0_1.fits"
+        sel_steps = self.steps if apply_selection else None
+        return read.SDSS(fpath, h=1, sel_steps=sel_steps)
+
+
+class SDSSxALFALFA:
+    @staticmethod
+    def steps(cls):
+        return [(lambda x: cls[x], ("IN_DR7_LSS",)),
+                (lambda x: cls[x] < 17.6, ("ELPETRO_APPMAG_r", )),
+                (lambda x: cls[x] < 155, ("DIST", ))
+                ]
+
+    def __call__(self, fpath=None, apply_selection=True):
+        if fpath is None:
+            fpath = "/mnt/extraspace/rstiskalek/catalogs/5asfullmatch.fits"
+        sel_steps = self.steps if apply_selection else None
+        return read.SDSS(fpath, h=1, sel_steps=sel_steps)
+
+
+###############################################################################
+#                              Clusters                                       #
+###############################################################################
+
+clusters = {"Virgo": read.ObservedCluster(RA=hms_to_degrees(12, 27),
+                                          dec=dms_to_degrees(12, 43),
+                                          dist=16.5 * 0.7,
+                                          name="Virgo"),
+            }
