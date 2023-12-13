@@ -142,7 +142,7 @@ def evaluate_field(field, pos, nrand, smooth_scales=None, seed=42,
 
 def match_to_no_selection(val, rand_val, parser_args):
     if parser_args.survey == "SDSSxALFALFA":
-        survey = csiborgtools.SDSSxALFALFA()(apply_selection=False)
+        survey = csiborgtools.SDSSxALFALFA()()
     else:
         raise NotImplementedError(
             f"Survey `{parser_args.survey}` not implemented for matching to no selection.")  # noqa
