@@ -140,6 +140,22 @@ def evaluate_field(field, pos, nrand, smooth_scales=None, seed=42,
     return val, rand_val, smooth_scales
 
 
+def match_to_no_selection(val, rand_val, parser_args):
+    if parser_args.survey == "SDSSxALFALFA":
+        survey = csiborgtools.SDSSxALFALFA()(apply_selection=False)
+    else:
+        raise NotImplementedError(
+            f"Survey `{parser_args.survey}` not implemented for matching to no selection.")  # noqa
+
+    if val is not None:
+        val = csiborgtools.read.match_array_to_no_masking(val, survey)
+    if rand_val is not None:
+        rand_val = csiborgtools.read.match_array_to_no_masking(rand_val,
+                                                               survey)
+
+    return val, rand_val
+
+
 def main(nsim, parser_args, pos, indxs, paths, verbose):
     """Load the field, interpolate it and save it to disk."""
     fpath_field = paths.field(parser_args.kind, parser_args.MAS,
@@ -161,6 +177,10 @@ def main(nsim, parser_args, pos, indxs, paths, verbose):
         fout = paths.field_interpolated(parser_args.survey, parser_args.kind,
                                         parser_args.MAS, parser_args.grid,
                                         nsim, parser_args.in_rsp)
+        # The survey above had some cuts, however for compatibility we want
+        # the same shape as the `uncut` survey
+        val, rand_val = match_to_no_selection(val, rand_val, parser_args)
+
     if verbose:
         print(f"Saving to ... `{fout}`.")
     numpy.savez(fout, val=val, rand_val=rand_val, indxs=indxs,
