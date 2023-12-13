@@ -9,7 +9,7 @@ however with little effort it can support other simulations as well.
 
 ## TODO
 - [x] Prune old CSiBORG1 merger tree things.
-- [ ] Add visualiastion of the density field.
+- [x] Add visualiastion of the density field.
 - [ ] Add full support for CSiBORG2 suite of simulations.
 - [ ] Add SPH field calculation from cosmotools.
 
