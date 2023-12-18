@@ -13,11 +13,11 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """
-Utility functions for the field module.
+Utility functions used in the rest of the `field` module to avoid circular
+imports.
 """
-import healpy
+from numba import jit
 import numpy
-import smoothing_library as SL
 
 
 def force_single_precision(x):
@@ -29,28 +29,16 @@ def force_single_precision(x):
     return x
 
 
-def smoothen_field(field, smooth_scale, boxsize, threads=1, make_copy=False):
+@jit(nopython=True)
+def divide_nonzero(field0, field1):
     """
-    Smooth a field with a Gaussian filter.
+    Perform in-place `field0 /= field1` but only where `field1 != 0`.
     """
-    W_k = SL.FT_filter(boxsize, smooth_scale, field.shape[0], "Gaussian",
-                       threads)
+    assert field0.shape == field1.shape, "Field shapes must match."
 
-    if make_copy:
-        field = numpy.copy(field)
-
-    return SL.field_smoothing(field, W_k, threads)
-
-
-def nside2radec(nside):
-    """
-    Generate RA [0, 360] deg. and declination [-90, 90] deg. for HEALPix pixel
-    centres at a given nside.
-    """
-    pixs = numpy.arange(healpy.nside2npix(nside))
-    theta, phi = healpy.pix2ang(nside, pixs)
-
-    ra = 180 / numpy.pi * phi
-    dec = 90 - 180 / numpy.pi * theta
-
-    return numpy.vstack([ra, dec]).T
+    imax, jmax, kmax = field0.shape
+    for i in range(imax):
+        for j in range(jmax):
+            for k in range(kmax):
+                if field1[i, j, k] != 0:
+                    field0[i, j, k] /= field1[i, j, k]

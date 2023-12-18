@@ -12,14 +12,9 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-"""
-MPI script to calculate density field-derived fields in the CSiBORG
-simulations' final snapshot.
-"""
+"""MPI script to calculate the various fields."""
 from argparse import ArgumentParser
 from datetime import datetime
-from distutils.util import strtobool
-from gc import collect
 
 import numpy
 from mpi4py import MPI
@@ -30,54 +25,42 @@ from utils import get_nsims
 
 
 ###############################################################################
-#                   Cosmotool SPH density & velocity field                    #
-###############################################################################
-
-def cosmotool_sph(nsim, parser_args):
-    pass
-
-
-
-###############################################################################
 #                            Density field                                    #
 ###############################################################################
 
 
-def density_field(nsim, parser_args, to_save=True):
-    """
-    Calculate the density field in the CSiBORG simulation.
-    """
+def density_field(nsim, parser_args):
+    """Calculate the density field."""
+    if parser_args.MAS == "SPH":
+        raise NotImplementedError("SPH is not implemented here. Use cosmotool")
+
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
-    box = csiborgtools.read.CSiBORG1Box(nsnap, nsim, paths)
-    fname = paths.processed_output(nsim, "csiborg", "halo_catalogue")
+    nsnap = max(paths.get_snapshots(nsim, parser_args.simname))
 
-    if not parser_args.in_rsp:
-        # TODO I removed this function
-        snap = csiborgtools.read.read_h5(fname)["snapshot_final"]
-        pos = snap["pos"]
-        mass = snap["mass"]
-
-        gen = csiborgtools.field.DensityField(box, parser_args.MAS)
-        field = gen(pos, mass, parser_args.grid, verbose=parser_args.verbose)
+    # Read in the particle coordinates and masses
+    if parser_args.simname == "csiborg1":
+        snapshot = csiborgtools.read.CSIBORG1Snapshot(nsim, nsnap, paths)
+    elif "csiborg2" in parser_args.simname:
+        kind = parser_args.simname.split("_")[-1]
+        snapshot = csiborgtools.read.CSIBORG2Snapshot(nsim, nsnap, paths, kind)
+    elif parser_args.simname == "quijote":
+        snapshot = csiborgtools.read.QuijoteSnapshot(nsim, nsnap, paths)
     else:
-        field = numpy.load(paths.field(
-            "density", parser_args.MAS, parser_args.grid, nsim, False))
-        radvel_field = numpy.load(paths.field(
-            "radvel", parser_args.MAS, parser_args.grid, nsim, False))
+        raise RuntimeError(f"Unknown simulation name `{parser_args.simname}`.")
 
-        if parser_args.verbose:
-            print(f"{datetime.now()}: converting density field to RSP.",
-                  flush=True)
+    pos = snapshot.coordinates()
+    mass = snapshot.masses()
 
-        field = csiborgtools.field.field2rsp(field, radvel_field, box,
-                                             parser_args.MAS)
+    # Run the field generator
+    boxsize = csiborgtools.simname2boxsize(parser_args.simname)
+    gen = csiborgtools.field.DensityField(boxsize, parser_args.MAS)
+    field = gen(pos, mass, parser_args.grid)
 
-    if to_save:
-        fout = paths.field(parser_args.kind, parser_args.MAS, parser_args.grid,
-                           nsim, parser_args.in_rsp)
-        print(f"{datetime.now()}: saving output to `{fout}`.")
-        numpy.save(fout, field)
+    fout = paths.field("density", parser_args.MAS, parser_args.grid,
+                       nsim, parser_args.simname)
+
+    print(f"{datetime.now()}: saving output to `{fout}`.")
+    numpy.save(fout, field)
     return field
 
 
@@ -86,31 +69,36 @@ def density_field(nsim, parser_args, to_save=True):
 ###############################################################################
 
 
-def velocity_field(nsim, parser_args, to_save=True):
-    """
-    Calculate the velocity field in a CSiBORG simulation.
-    """
-    if parser_args.in_rsp:
-        raise NotImplementedError("Velocity field in RSP is not implemented.")
+def velocity_field(nsim, parser_args):
+    """Calculate the velocity field."""
+    if parser_args.MAS == "SPH":
+        raise NotImplementedError("SPH is not implemented here. Use cosmotool")
 
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
-    box = csiborgtools.read.CSiBORG1Box(nsnap, nsim, paths)
-    fname = paths.processed_output(nsim, "csiborg", "halo_catalogue")
+    nsnap = max(paths.get_snapshots(nsim, parser_args.simname))
 
-    snap = csiborgtools.read.read_h5(fname)["snapshot_final"]
-    pos = snap["pos"]
-    vel = snap["vel"]
-    mass = snap["mass"]
+    if parser_args.simname == "csiborg1":
+        snapshot = csiborgtools.read.CSIBORG1Snapshot(nsim, nsnap, paths)
+    elif "csiborg2" in parser_args.simname:
+        kind = parser_args.simname.split("_")[-1]
+        snapshot = csiborgtools.read.CSIBORG2Snapshot(nsim, nsnap, paths, kind)
+    elif parser_args.simname == "quijote":
+        snapshot = csiborgtools.read.QuijoteSnapshot(nsim, nsnap, paths)
+    else:
+        raise RuntimeError(f"Unknown simulation name `{parser_args.simname}`.")
 
-    gen = csiborgtools.field.VelocityField(box, parser_args.MAS)
-    field = gen(pos, vel, mass, parser_args.grid, verbose=parser_args.verbose)
+    pos = snapshot.coordinates()
+    vel = snapshot.velocities()
+    mass = snapshot.masses()
 
-    if to_save:
-        fout = paths.field("velocity", parser_args.MAS, parser_args.grid,
-                           nsim, in_rsp=False)
-        print(f"{datetime.now()}: saving output to `{fout}`.")
-        numpy.save(fout, field)
+    boxsize = csiborgtools.simname2boxsize(parser_args.simname)
+    gen = csiborgtools.field.VelocityField(boxsize, parser_args.MAS)
+    field = gen(pos, vel, mass, parser_args.grid)
+
+    fout = paths.field("velocity", parser_args.MAS, parser_args.grid,
+                       nsim, parser_args.simname)
+    print(f"{datetime.now()}: saving output to `{fout}`.")
+    numpy.save(fout, field)
     return field
 
 
@@ -119,125 +107,62 @@ def velocity_field(nsim, parser_args, to_save=True):
 ###############################################################################
 
 
-def radvel_field(nsim, parser_args, to_save=True):
-    """
-    Calculate the radial velocity field in the CSiBORG simulation.
-    """
-    if parser_args.in_rsp:
-        raise NotImplementedError("Radial vel. field in RSP not implemented.")
-
+def radvel_field(nsim, parser_args):
+    """Calculate the radial velocity field."""
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
-    box = csiborgtools.read.CSiBORG1Box(nsnap, nsim, paths)
 
-    vel = numpy.load(paths.field("velocity", parser_args.MAS, parser_args.grid,
-                                 nsim, parser_args.in_rsp))
-    observer_velocity = csiborgtools.field.observer_vobs(vel)
-
-    gen = csiborgtools.field.VelocityField(box, parser_args.MAS)
-    field = gen.radial_velocity(vel, observer_velocity)
-
-    if to_save:
-        fout = paths.field("radvel", parser_args.MAS, parser_args.grid,
-                           nsim, parser_args.in_rsp)
-        print(f"{datetime.now()}: saving output to `{fout}`.")
-        numpy.save(fout, field)
-    return field
-
-###############################################################################
-#                          Potential field                                    #
-###############################################################################
-
-
-def potential_field(nsim, parser_args, to_save=True):
-    """
-    Calculate the potential field in the CSiBORG simulation.
-    """
-    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
-    box = csiborgtools.read.CSiBORG1Box(nsnap, nsim, paths)
-
-    if not parser_args.in_rsp:
-        rho = numpy.load(paths.field(
-            "density", parser_args.MAS, parser_args.grid, nsim, in_rsp=False))
-        density_gen = csiborgtools.field.DensityField(box, parser_args.MAS)
-        rho = density_gen.overdensity_field(rho)
-
-        gen = csiborgtools.field.PotentialField(box, parser_args.MAS)
-        field = gen(rho)
+    if parser_args.simname == "csiborg1":
+        field = csiborgtools.read.CSiBORG1Field(nsim, paths)
+    elif "csiborg2" in parser_args.simname:
+        kind = parser_args.simname.split("_")[-1]
+        field = csiborgtools.read.CSiBORG2Field(nsim, paths, kind)
+    elif parser_args.simname == "quijote":
+        field = csiborgtools.read.QuijoteField(nsim, paths)
     else:
-        field = numpy.load(paths.field(
-            "potential", parser_args.MAS, parser_args.grid, nsim, False))
-        radvel_field = numpy.load(paths.field(
-            "radvel", parser_args.MAS, parser_args.grid, nsim, False))
+        raise RuntimeError(f"Unknown simulation name `{parser_args.simname}`.")
 
-        field = csiborgtools.field.field2rsp(field, radvel_field, box,
-                                             parser_args.MAS)
+    vel = field.velocity_field(parser_args.MAS, parser_args.grid)
 
-    if to_save:
-        fout = paths.field(parser_args.kind, parser_args.MAS, parser_args.grid,
-                           nsim, parser_args.in_rsp)
-        print(f"{datetime.now()}: saving output to `{fout}`.")
-        numpy.save(fout, field)
+    observer_velocity = csiborgtools.field.observer_peculiar_velocity(vel)
+    radvel = csiborgtools.field.radial_velocity(vel, observer_velocity)
+
+    fout = paths.field("radvel", parser_args.MAS, parser_args.grid,
+                       nsim, parser_args.simname)
+    print(f"{datetime.now()}: saving output to `{fout}`.")
+    numpy.save(fout, radvel)
     return field
 
 
-###############################################################################
-#                        Environment classification                           #
-###############################################################################
-
-
-def environment_field(nsim, parser_args, to_save=True):
+def observer_peculiar_velocity(nsim, parser_args):
     """
-    Calculate the environmental classification in the CSiBORG simulation.
+    Calculate the peculiar velocity of an observer in the centre of the box
+    for several smoothing scales.
     """
-    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsnap = max(paths.get_snapshots(nsim, "csiborg"))
-    box = csiborgtools.read.CSiBORG1Box(nsnap, nsim, paths)
+    boxsize = csiborgtools.simname2boxsize(parser_args.simname)
+    # NOTE thevse values are hard-coded.
+    smooth_scales = numpy.array([0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+    smooth_scales /= boxsize
 
-    rho = numpy.load(paths.field(
-        "density", parser_args.MAS, parser_args.grid, nsim, in_rsp=False))
-    density_gen = csiborgtools.field.DensityField(box, parser_args.MAS)
-    rho = density_gen.overdensity_field(rho)
+    if parser_args.simname == "csiborg1":
+        field = csiborgtools.read.CSiBORG1Field(nsim, paths)
+    elif "csiborg2" in parser_args.simname:
+        kind = parser_args.simname.split("_")[-1]
+        field = csiborgtools.read.CSiBORG2Field(nsim, paths, kind)
+    elif parser_args.simname == "quijote":
+        field = csiborgtools.read.QuijoteField(nsim, paths)
+    else:
+        raise RuntimeError(f"Unknown simulation name `{parser_args.simname}`.")
 
-    if parser_args.smooth_scale > 0.0:
-        rho = csiborgtools.field.smoothen_field(
-            rho, parser_args.smooth_scale, box.box2mpc(1.))
+    vel = field.velocity_field(parser_args.MAS, parser_args.grid)
 
-    gen = csiborgtools.field.TidalTensorField(box, parser_args.MAS)
-    field = gen(rho)
+    observer_vp = csiborgtools.field.observer_peculiar_velocity(
+        vel, smooth_scales)
 
-    del rho
-    collect()
-
-    if parser_args.in_rsp:
-        radvel_field = numpy.load(paths.field(
-            "radvel", parser_args.MAS, parser_args.grid, nsim, False))
-        args = (radvel_field, box, parser_args.MAS)
-
-        field.T00 = csiborgtools.field.field2rsp(field.T00, *args)
-        field.T11 = csiborgtools.field.field2rsp(field.T11, *args)
-        field.T22 = csiborgtools.field.field2rsp(field.T22, *args)
-        field.T01 = csiborgtools.field.field2rsp(field.T01, *args)
-        field.T02 = csiborgtools.field.field2rsp(field.T02, *args)
-        field.T12 = csiborgtools.field.field2rsp(field.T12, *args)
-
-        del radvel_field
-        collect()
-
-    eigvals = gen.tensor_field_eigvals(field)
-
-    del field
-    collect()
-
-    env = gen.eigvals_to_environment(eigvals)
-
-    if to_save:
-        fout = paths.field("environment", parser_args.MAS, parser_args.grid,
-                           nsim, parser_args.in_rsp, parser_args.smooth_scale)
-        print(f"{datetime.now()}: saving output to `{fout}`.")
-        numpy.save(fout, env)
-    return env
+    fout = paths.observer_peculiar_velocity(parser_args.MAS, parser_args.grid,
+                                            nsim, parser_args.simname)
+    print(f"Saving to ... `{fout}`")
+    numpy.savez(fout, smooth_scales=smooth_scales, observer_vp=observer_vp)
+    return observer_vp
 
 
 ###############################################################################
@@ -249,39 +174,124 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--nsims", type=int, nargs="+", default=None,
                         help="IC realisations. `-1` for all simulations.")
+    parser.add_argument("--simname", type=str, help="Simulation name.")
     parser.add_argument("--kind", type=str,
-                        choices=["density", "rspdensity", "velocity", "radvel",
-                                 "potential", "environment"],
+                        choices=["density", "velocity", "radvel", "observer_vp"],  # noqa
                         help="What derived field to calculate?")
     parser.add_argument("--MAS", type=str,
-                        choices=["NGP", "CIC", "TSC", "PCS"])
+                        choices=["NGP", "CIC", "TSC", "PCS", "SPH"],
+                        help="Mass assignment scheme.")
     parser.add_argument("--grid", type=int, help="Grid resolution.")
-    parser.add_argument("--in_rsp", type=lambda x: bool(strtobool(x)),
-                        help="Calculate in RSP?")
-    parser.add_argument("--smooth_scale", type=float, default=0.0,
-                        help="Smoothing scale in Mpc / h. Only used for the environment field.")  # noqa
-    parser.add_argument("--verbose", type=lambda x: bool(strtobool(x)),
-                        help="Verbosity flag for reading in particles.")
-    parser.add_argument("--simname", type=str, default="csiborg",
-                        choices=["csiborg", "csiborg2"],
-                        help="Verbosity flag for reading in particles.")
     parser_args = parser.parse_args()
+
     comm = MPI.COMM_WORLD
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsims = get_nsims(parser_args, paths)
 
     def main(nsim):
-        if parser_args.kind == "density" or parser_args.kind == "rspdensity":
+        if parser_args.kind == "density":
             density_field(nsim, parser_args)
         elif parser_args.kind == "velocity":
             velocity_field(nsim, parser_args)
         elif parser_args.kind == "radvel":
             radvel_field(nsim, parser_args)
-        elif parser_args.kind == "potential":
-            potential_field(nsim, parser_args)
-        elif parser_args.kind == "environment":
-            environment_field(nsim, parser_args)
+        elif parser_args.kind == "observer_vp":
+            observer_peculiar_velocity(nsim, parser_args)
         else:
             raise RuntimeError(f"Field {parser_args.kind} is not implemented.")
 
     work_delegation(main, nsims, comm, master_verbose=True)
+
+
+# def potential_field(nsim, parser_args, to_save=True):
+#     """
+#     Calculate the potential field in the CSiBORG simulation.
+#     """
+#     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+#     nsnap = max(paths.get_snapshots(nsim, "csiborg"))
+#     box = csiborgtools.read.CSiBORG1Box(nsnap, nsim, paths)
+#
+#     if not parser_args.in_rsp:
+#         rho = numpy.load(paths.field(
+#             "density", parser_args.MAS, parser_args.grid, nsim,
+# in_rsp=False))
+#         density_gen = csiborgtools.field.DensityField(box, parser_args.MAS)
+#         rho = density_gen.overdensity_field(rho)
+#
+#         gen = csiborgtools.field.PotentialField(box, parser_args.MAS)
+#         field = gen(rho)
+#     else:
+#         field = numpy.load(paths.field(
+#             "potential", parser_args.MAS, parser_args.grid, nsim, False))
+#         radvel_field = numpy.load(paths.field(
+#             "radvel", parser_args.MAS, parser_args.grid, nsim, False))
+#
+#         field = csiborgtools.field.field2rsp(field, radvel_field, box,
+#                                              parser_args.MAS)
+#
+#     if to_save:
+#         fout = paths.field(parser_args.kind, parser_args.MAS,
+# parser_args.grid,
+#                            nsim, parser_args.in_rsp)
+#         print(f"{datetime.now()}: saving output to `{fout}`.")
+#         numpy.save(fout, field)
+#     return field
+#
+#
+# #############################################################################
+# #                        Environment classification                         #
+# #############################################################################
+#
+#
+# def environment_field(nsim, parser_args, to_save=True):
+#     """
+#     Calculate the environmental classification in the CSiBORG simulation.
+#     """
+#     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
+#     nsnap = max(paths.get_snapshots(nsim, "csiborg"))
+#     box = csiborgtools.read.CSiBORG1Box(nsnap, nsim, paths)
+#
+#     rho = numpy.load(paths.field(
+#         "density", parser_args.MAS, parser_args.grid, nsim, in_rsp=False))
+#     density_gen = csiborgtools.field.DensityField(box, parser_args.MAS)
+#     rho = density_gen.overdensity_field(rho)
+#
+#     if parser_args.smooth_scale > 0.0:
+#         rho = csiborgtools.field.smoothen_field(
+#             rho, parser_args.smooth_scale, box.box2mpc(1.))
+#
+#     gen = csiborgtools.field.TidalTensorField(box, parser_args.MAS)
+#     field = gen(rho)
+#
+#     del rho
+#     collect()
+#
+#     if parser_args.in_rsp:
+#         radvel_field = numpy.load(paths.field(
+#             "radvel", parser_args.MAS, parser_args.grid, nsim, False))
+#         args = (radvel_field, box, parser_args.MAS)
+#
+#         field.T00 = csiborgtools.field.field2rsp(field.T00, *args)
+#         field.T11 = csiborgtools.field.field2rsp(field.T11, *args)
+#         field.T22 = csiborgtools.field.field2rsp(field.T22, *args)
+#         field.T01 = csiborgtools.field.field2rsp(field.T01, *args)
+#         field.T02 = csiborgtools.field.field2rsp(field.T02, *args)
+#         field.T12 = csiborgtools.field.field2rsp(field.T12, *args)
+#
+#         del radvel_field
+#         collect()
+#
+#     eigvals = gen.tensor_field_eigvals(field)
+#
+#     del field
+#     collect()
+#
+#     env = gen.eigvals_to_environment(eigvals)
+#
+#     if to_save:
+#         fout = paths.field("environment", parser_args.MAS, parser_args.grid,
+#                            nsim, parser_args.in_rsp,
+# parser_args.smooth_scale)
+#         print(f"{datetime.now()}: saving output to `{fout}`.")
+#         numpy.save(fout, env)
+#     return env

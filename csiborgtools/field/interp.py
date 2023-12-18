@@ -15,13 +15,15 @@
 """
 Tools for interpolating 3D fields at arbitrary positions.
 """
+import healpy
 import MAS_library as MASL
 import numpy
+import smoothing_library as SL
 from numba import jit
-from tqdm import trange, tqdm
+from tqdm import tqdm, trange
 
-from .utils import force_single_precision, smoothen_field
 from ..utils import periodic_wrap_grid, radec_to_cartesian
+from .utils import divide_nonzero, force_single_precision
 
 
 ###############################################################################
@@ -169,7 +171,7 @@ def evaluate_sky(*fields, pos, mpc2box, smooth_scales=None, verbose=False):
                               smooth_scales=smooth_scales, verbose=verbose)
 
 
-def make_sky(field, angpos, dist, boxsize, volume_weight=True, verbose=True):
+def make_sky(field, angpos, dist, boxsize, verbose=True):
     r"""
     Make a sky map of a scalar field. The observer is in the centre of the
     box the field is evaluated along directions `angpos` (RA [0, 360) deg,
@@ -186,8 +188,6 @@ def make_sky(field, angpos, dist, boxsize, volume_weight=True, verbose=True):
         Uniformly spaced radial distances to evaluate the field in `Mpc / h`.
     boxsize : float
         Box size in `Mpc / h`.
-    volume_weight : bool, optional
-        Whether to weight the field by the volume of the pixel.
     verbose : bool, optional
         Verbosity flag.
 
@@ -209,15 +209,28 @@ def make_sky(field, angpos, dist, boxsize, volume_weight=True, verbose=True):
         dir_loop[:, 0] = dist
         dir_loop[:, 1] = angpos[i, 0]
         dir_loop[:, 2] = angpos[i, 1]
-        if volume_weight:
-            out[i] = numpy.sum(
-                dist**2
-                * evaluate_sky(field, pos=dir_loop, mpc2box=1 / boxsize))
-        else:
-            out[i] = numpy.sum(
-                evaluate_sky(field, pos=dir_loop, mpc2box=1 / boxsize))
-    out *= dx
+
+        out[i] = numpy.sum(
+            dist**2 * evaluate_sky(field, pos=dir_loop, mpc2box=1 / boxsize))
+
+    # Assuming the field is in h^2 Msun / kpc**3, we need to convert Mpc / h
+    # to kpc / h and multiply by the pixel area.
+    out *= dx * 1e9 * 4 * numpy.pi / len(angpos)
     return out
+
+
+def nside2radec(nside):
+    """
+    Generate RA [0, 360] deg. and declination [-90, 90] deg. for HEALPix pixel
+    centres at a given nside.
+    """
+    pixs = numpy.arange(healpy.nside2npix(nside))
+    theta, phi = healpy.pix2ang(nside, pixs)
+
+    ra = 180 / numpy.pi * phi
+    dec = 90 - 180 / numpy.pi * theta
+
+    return numpy.vstack([ra, dec]).T
 
 
 ###############################################################################
@@ -303,21 +316,6 @@ def field2rsp(field, radvel_field, box, MAS, init_value=0.):
 
 
 @jit(nopython=True)
-def divide_nonzero(field0, field1):
-    """
-    Perform in-place `field0 /= field1` but only where `field1 != 0`.
-    """
-    assert field0.shape == field1.shape, "Field shapes must match."
-
-    imax, jmax, kmax = field0.shape
-    for i in range(imax):
-        for j in range(jmax):
-            for k in range(kmax):
-                if field1[i, j, k] != 0:
-                    field0[i, j, k] /= field1[i, j, k]
-
-
-@jit(nopython=True)
 def fill_outside(field, fill_value, rmax, boxsize):
     """
     Fill cells outside of a sphere of radius `rmax` around the box centre with
@@ -339,3 +337,16 @@ def fill_outside(field, fill_value, rmax, boxsize):
                 if idist2 + jdist2 + kdist2 > rmax_box2:
                     field[i, j, k] = fill_value
     return field
+
+
+def smoothen_field(field, smooth_scale, boxsize, threads=1, make_copy=False):
+    """
+    Smooth a field with a Gaussian filter.
+    """
+    W_k = SL.FT_filter(boxsize, smooth_scale, field.shape[0], "Gaussian",
+                       threads)
+
+    if make_copy:
+        field = numpy.copy(field)
+
+    return SL.field_smoothing(field, W_k, threads)

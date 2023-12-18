@@ -41,23 +41,26 @@ class Paths:
 
     Parameters
     ----------
-    # HERE EDIT EVERYTHING
-    srcdir : str, optional
-        Path to the folder where the RAMSES outputs are stored.
-    postdir: str, optional
-        Path to the folder where post-processed files are stored.
-    borg_dir : str, optional
-        Path to the folder where BORG MCMC chains are stored.
-    quiote_dir : str, optional
-        Path to the folder where Quijote simulations are stored.
+    csiborg1_srcdir : str
+        Path to the CSiBORG1 simulation directory.
+    csiborg2_main_srcdir : str
+        Path to the CSiBORG2 main simulation directory.
+    csiborg2_random_srcdir : str
+        Path to the CSiBORG2 random simulation directory.
+    csiborg2_varysmall_srcdir : str
+        Path to the CSiBORG2 varysmall simulation directory.
+    postdir : str
+        Path to the CSiBORG post-processing directory.
+    quijote_dir : str
+        Path to the Quijote simulation directory.
     """
     def __init__(self,
-                 csiborg1_srcdir=None,
-                 csiborg2_main_srcdir=None,
-                 csiborg2_random_srcdir=None,
-                 csiborg2_varysmall_srcdir=None,
-                 postdir=None,
-                 quijote_dir=None
+                 csiborg1_srcdir,
+                 csiborg2_main_srcdir,
+                 csiborg2_random_srcdir,
+                 csiborg2_varysmall_srcdir,
+                 postdir,
+                 quijote_dir,
                  ):
         self.csiborg1_srcdir = csiborg1_srcdir
         self.csiborg2_main_srcdir = csiborg2_main_srcdir
@@ -117,8 +120,6 @@ class Paths:
         -------
         snapshots : 1-dimensional array
         """
-        # simpath = self.snapshots(nsim, simname, tonew=False)
-
         if simname == "csiborg1":
             snaps = glob(join(self.csiborg1_srcdir, f"chain_{nsim}",
                               "snapshot_*"))
@@ -176,18 +177,55 @@ class Paths:
             return join(self.csiborg1_srcdir, f"chain_{nsim}",
                         f"snapshot_{str(nsnap).zfill(5)}.hdf5")
         elif simname == "csiborg2_main":
-            return join(self.csiborg2_main_srcdir, f"chain_{nsim}",
-                        f"snapshot_{str(nsnap).zfill(3)}.hdf5")
+            return join(self.csiborg2_main_srcdir, f"chain_{nsim}", "output",
+                        f"snapshot_{str(nsnap).zfill(3)}_full.hdf5")
         elif simname == "csiborg2_random":
-            return join(self.csiborg2_random_srcdir, f"chain_{nsim}",
-                        f"snapshot_{str(nsnap).zfill(3)}.hdf5")
+            return join(self.csiborg2_random_srcdir, f"chain_{nsim}", "output",
+                        f"snapshot_{str(nsnap).zfill(3)}_full.hdf5")
         elif simname == "csiborg2_varysmall":
             return join(self.csiborg2_varysmall_srcdir, f"chain_{nsim}",
-                        f"snapshot_{str(nsnap).zfill(3)}.hdf5")
+                        "output", f"snapshot_{str(nsnap).zfill(3)}_full.hdf5")
         elif simname == "quijote":
             return join(self.quijote_dir, "fiducial_processed",
                         f"chain_{nsim}",
                         f"snapshot_{str(nsnap).zfill(3)}.hdf5")
+        else:
+            raise ValueError(f"Unknown simulation name `{simname}`.")
+
+    def snapshot_catalogue(self, nsnap, nsim, simname):
+        """
+        Path to the halo catalogue of a simulation snapshot.
+
+        Parameters
+        ----------
+        nsnap : int
+            Snapshot index.
+        nsim : int
+            IC realisation index.
+        simname : str
+            Simulation name.
+
+        Returns
+        -------
+        str
+        """
+        if simname == "csiborg1":
+            return join(self.csiborg1_srcdir, f"chain_{nsim}",
+                        f"fof_{str(nsnap).zfill(5)}.hdf5")
+        elif simname == "csiborg2_main":
+            return join(self.csiborg2_main_srcdir, f"chain_{nsim}", "output",
+                        f"fof_subhalo_tab_{str(nsnap).zfill(3)}.hdf5")
+        elif simname == "csiborg2_random":
+            return join(self.csiborg2_ranodm_srcdir, f"chain_{nsim}", "output",
+                        f"fof_subhalo_tab_{str(nsnap).zfill(3)}.hdf5")
+        elif simname == "csiborg2_varysmall":
+            return join(self.csiborg2_varysmall_srcdir, f"chain_{nsim}",
+                        "output",
+                        f"fof_subhalo_tab_{str(nsnap).zfill(3)}.hdf5")
+        elif simname == "quijote":
+            return join(self.quijote_dir, "fiducial_processed",
+                        f"chain_{nsim}",
+                        f"fof_{str(nsnap).zfill(3)}.hdf5")
         else:
             raise ValueError(f"Unknown simulation name `{simname}`.")
 
@@ -274,48 +312,77 @@ class Paths:
 
         return join(fdir, fname)
 
-    def field(self, kind, MAS, grid, nsim, in_rsp, smooth_scale=None):
+    def field(self, kind, MAS, grid, nsim, simname):
         r"""
         Path to the files containing the calculated fields in CSiBORG.
 
         Parameters
         ----------
         kind : str
-            Field type. Must be one of: `density`, `velocity`, `potential`,
-            `radvel`, `environment`.
+            Field type.
         MAS : str
            Mass-assignment scheme.
         grid : int
             Grid size.
         nsim : int
             IC realisation index.
-        in_rsp : bool
-            Whether the calculation is performed in redshift space.
-        smooth_scale : float, optional
-            Smoothing scale in Mpc/h.
+        simname : str
+            Simulation name.
 
         Returns
         -------
         str
         """
-        assert kind in ["density", "velocity", "potential", "radvel",
-                        "environment"]
-        fdir = join(self.postdir, "environment")
+        if MAS == "SPH":
+            if kind not in ["density", "velocity"]:
+                raise ValueError("SPH field must be either `density` or `velocity`.")  # noqa
 
+            if simname == "csiborg1":
+                raise ValueError("SPH field not available for CSiBORG1.")
+            elif simname == "csiborg2_main":
+                return join(self.csiborg2_main_srcdir, "field",
+                            f"chain_{nsim}_{grid}.hdf5")
+            elif simname == "csiborg2_random":
+                return join(self.csiborg2_random_srcdir, "field",
+                            f"chain_{nsim}_{grid}.hdf5")
+            elif simname == "csiborg2_varysmall":
+                return join(self.csiborg2_varysmall_srcdir, "field",
+                            f"chain_{nsim}_{grid}.hdf5")
+            elif simname == "quijote":
+                raise ValueError("SPH field not available for CSiBORG1.")
+
+        fdir = join(self.postdir, "environment")
         try_create_directory(fdir)
 
-        if in_rsp:
-            kind = kind + "_rsp"
-
-        fname = f"{kind}_{MAS}_{str(nsim).zfill(5)}_grid{grid}.npy"
-
-        if smooth_scale is not None:
-            fname = fname.replace(".npy", f"_smooth{smooth_scale}.npy")
+        fname = f"{kind}_{simname}_{MAS}_{str(nsim).zfill(5)}_{grid}.npy"
 
         return join(fdir, fname)
 
-    def field_interpolated(self, survey, kind, MAS, grid, nsim, in_rsp,
-                           smooth_scale=None):
+    def observer_peculiar_velocity(self, MAS, grid, nsim, simname):
+        """
+        Path to the files containing the observer peculiar velocity.
+
+        Parameters
+        ----------
+        MAS : str
+            Mass-assignment scheme.
+        grid : int
+            Grid size.
+        nsim : int
+            IC realisation index.
+        simname : str
+            Simulation name.
+
+        Returns
+        -------
+        str
+        """
+        fdir = join(self.postdir, "environment")
+        try_create_directory(fdir)
+        fname = f"observer_peculiar_velocity_{simname}_{MAS}_{str(nsim).zfill(5)}_{grid}.npz"  # noqa
+        return join(fdir, fname)
+
+    def field_interpolated(self, survey, kind, MAS, grid, nsim, in_rsp):
         """
         Path to the files containing the CSiBORG interpolated field for a given
         survey.
@@ -335,13 +402,12 @@ class Paths:
             IC realisation index.
         in_rsp : bool
             Whether the calculation is performed in redshift space.
-        smooth_scale : float, optional
-            Smoothing scale in Mpc/h.
 
         Returns
         -------
         str
         """
+        raise NotImplementedError("This function is not implemented yet.")
         assert kind in ["density", "velocity", "potential", "radvel",
                         "environment"]
         fdir = join(self.postdir, "environment_interpolated")
@@ -352,9 +418,6 @@ class Paths:
             kind = kind + "_rsp"
 
         fname = f"{survey}_{kind}_{MAS}_{str(nsim).zfill(5)}_grid{grid}.npz"
-
-        if smooth_scale is not None:
-            fname = fname.replace(".npz", f"_smooth{smooth_scale}.npz")
 
         return join(fdir, fname)
 
