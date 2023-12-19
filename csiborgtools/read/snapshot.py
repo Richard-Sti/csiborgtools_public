@@ -18,9 +18,13 @@ should be implemented things such as flipping x- and z-axes, to make sure that
 observed RA-dec can be mapped into the simulation box.
 """
 from abc import ABC, abstractmethod, abstractproperty
-import numpy
 
+import numpy
 from h5py import File
+
+from ..params import paths_glamdring, simname2boxsize
+from .paths import Paths
+from .util import find_boxed
 
 ###############################################################################
 #                          Base snapshot class                                #
@@ -66,6 +70,30 @@ class BaseSnapshot(ABC):
         return self._nsnap
 
     @property
+    def simname(self):
+        """
+        Simulation name.
+
+        Returns
+        -------
+        str
+        """
+        if self._simname is None:
+            raise ValueError("Simulation name not set.")
+        return self._simname
+
+    @property
+    def boxsize(self):
+        """
+        Simulation boxsize in `cMpc/h`.
+
+        Returns
+        -------
+        float
+        """
+        return simname2boxsize(self.simname)
+
+    @property
     def paths(self):
         """
         Paths manager.
@@ -74,6 +102,8 @@ class BaseSnapshot(ABC):
         -------
         Paths
         """
+        if self._paths is None:
+            self._paths = Paths(**paths_glamdring)
         return self._paths
 
     @abstractproperty
@@ -191,6 +221,27 @@ class BaseSnapshot(ABC):
         """
         pass
 
+    def select_box(self, center, boxwidth):
+        """
+        Find particle coordinates of particles within a box of size `boxwidth`
+        centered on `center`.
+
+        Parameters
+        ----------
+        center : 1-dimensional array
+            Center of the box.
+        boxwidth : float
+            Width of the box.
+
+        Returns
+        -------
+        pos : 2-dimensional array
+        """
+        pos = self.coordinates()
+        mask = find_boxed(pos, center, boxwidth, self.boxsize)
+
+        return pos[mask]
+
 
 ###############################################################################
 #                          CSiBORG1 snapshot class                            #
@@ -208,13 +259,14 @@ class CSIBORG1Snapshot(BaseSnapshot):
         Simulation index.
     nsnap : int
         Snapshot index.
-    paths : Paths
+    paths : Paths, optional
         Paths object.
     """
-    def __init__(self, nsim, nsnap, paths):
+    def __init__(self, nsim, nsnap, paths=None):
         super().__init__(nsim, nsnap, paths)
         self._snapshot_path = self.paths.snapshot(
             self.nsnap, self.nsim, "csiborg1")
+        self._simname = "csiborg1"
 
     def _get_particles(self, kind):
         with File(self._snapshot_path, "r") as f:
@@ -285,17 +337,18 @@ class CSIBORG2Snapshot(BaseSnapshot):
         Simulation index.
     nsnap : int
         Snapshot index.
-    paths : Paths
-        Paths object.
     kind : str
         CSiBORG2 run kind. One of `main`, `random`, or `varysmall`.
+    paths : Paths, optional
+        Paths object.
     """
-    def __init__(self, nsim, nsnap, paths, kind):
+    def __init__(self, nsim, nsnap, kind, paths=None):
         super().__init__(nsim, nsnap, paths)
         self.kind = kind
 
         self._snapshot_path = self.paths.snapshot(
             self.nsnap, self.nsim, f"csiborg2_{self.kind}")
+        self._simname = f"csiborg2_{self.kind}"
 
     @property
     def kind(self):
@@ -426,13 +479,14 @@ class QuijoteSnapshot(CSIBORG1Snapshot):
         Simulation index.
     nsnap : int
         Snapshot index.
-    paths : Paths
+    paths : Paths, optional
         Paths object.
     """
-    def __init__(self, nsim, nsnap, paths):
+    def __init__(self, nsim, nsnap, paths=None):
         super().__init__(nsim, nsnap, paths)
         self._snapshot_path = self.paths.snapshot(self.nsnap, self.nsim,
                                                   "quijote")
+        self._simname = "quijote"
 
     def _make_hid2offset(self):
         catalogue_path = self.paths.snapshot_catalogue(
