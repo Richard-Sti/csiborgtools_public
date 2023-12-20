@@ -941,6 +941,11 @@ def find_neighbour(nsim0, cats):
     return dists, cross_hindxs
 
 
+###############################################################################
+#                     Max's halo matching algorithms                          #
+###############################################################################
+
+
 def matching_max(cat0, catx, mass_kind, mult, periodic, overlap=None,
                  match_indxs=None, verbose=True):
     """
