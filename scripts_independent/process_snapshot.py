@@ -98,6 +98,35 @@ def cols_to_structured(N, cols):
     return numpy.full(N, numpy.nan, dtype=dtype)
 
 
+def copy_hdf5_file(src_file, dest_file, exclude_headers=None):
+    """
+    Make a copy of an HDF5 file, excluding the specified headers.
+
+    Parameters
+    ----------
+    src_file : str
+        Path to the source file.
+    dest_file : str
+        Path to the destination file.
+    exclude_headers : str or list of str
+        Name of the headers to exclude, optional.
+
+    Returns
+    -------
+    None
+    """
+    if exclude_headers is None:
+        exclude_headers = []
+    if isinstance(exclude_headers, str):
+        exclude_headers = [exclude_headers]
+
+    with File(src_file, 'r') as src, File(dest_file, 'w') as dest:
+        # Copying all groups and datasets except the ones in exclude_headers
+        for name, item in src.items():
+            if name not in exclude_headers:
+                src.copy(item, dest)
+
+
 ###############################################################################
 #                       Base reader of snapshots                              #
 ###############################################################################
@@ -286,7 +315,7 @@ class CSiBORG2Reader(BaseReader):
         self.nsim = nsim
         if kind not in ["main", "random", "varysmall"]:
             raise ValueError(f"Unknown kind `{kind}`.")
-        base_dir = f"/mnt/extraspace/rstiskalek/csiborg2_{kind}"
+        self.base_dir = f"/mnt/extraspace/rstiskalek/csiborg2_{kind}"
 
         if which_snapshot == "initial":
             self.nsnap = 0
@@ -296,14 +325,20 @@ class CSiBORG2Reader(BaseReader):
             raise ValueError(f"Unknown snapshot option `{which_snapshot}`.")
 
         self.source_dir = join(
-            base_dir, f"chain_{nsim}", "output",
-            f"snapshot_{str(self.nsnap).zfill(3)}_full.hdf5")
+                self.base_dir, f"chain_{nsim}", "output",
+                f"snapshot_{str(self.nsnap).zfill(3)}_full.hdf5")
+        if which_snapshot == "initial":
+            self.source_dir = self.source_dir.replace("_full.hdf5", ".hdf5")
 
-        self.output_dir = join(base_dir, f"chain_{nsim}", "output")
+        self.output_dir = join(self.base_dir, f"chain_{nsim}", "output")
         self.output_snap = join(
             self.output_dir,
             f"snapshot_{str(self.nsnap).zfill(3)}_sorted.hdf5")
         self.output_cat = None
+
+        self.offset_path = join(
+            self.base_dir, f"chain_{nsim}", "output",
+            f"fof_subhalo_tab_{str(self.nsnap).zfill(3)}_full.hdf5")
 
     def read_info(self):
         fpath = join(dirname(self.source_dir), "snapshot_99_full.hdf5")
@@ -323,8 +358,33 @@ class CSiBORG2Reader(BaseReader):
                    }
         return out
 
+    def _get_particles(self, kind):
+        with File(self.source_dir, "r") as f:
+            if kind == "Masses":
+                npart = f["Header"].attrs["NumPart_Total"][1]
+                x_high = numpy.ones(npart, dtype=numpy.float32)
+                x_high *= f["Header"].attrs["MassTable"][1]
+            else:
+                x_high = f[f"PartType1/{kind}"][...]
+
+            x_low = f[f"PartType5/{kind}"][...]
+
+        return x_high, x_low
+
     def read_snapshot(self, kind):
-        raise RuntimeError("TODO Not implemented.")
+        if kind == "pid":
+            x_high, x_low = self._get_particles("ParticleIDs")
+        elif kind == "pos":
+            x_high, x_low = self._get_particles("Coordinates")
+        elif kind == "mass":
+            x_high, x_low = self._get_particles("Masses")
+        elif kind == "vel":
+            x_high, x_low = self._get_particles("Velocities")
+        else:
+            raise ValueError(f"Unknown kind `{kind}`. "
+                             "Options are: `pid`, `pos`, `vel` or `mass`.")
+
+        return x_high, x_low
 
     def read_halo_id(self, pids):
         raise RuntimeError("TODO Not implemented.")
@@ -636,6 +696,9 @@ def process_initial_snapshot(nsim, simname):
     """
     Sort the initial snapshot particles according to their final snapshot and
     add them to the final snapshot's HDF5 file.
+
+    Note that there is a specific function for CSiBORG2 because of its Gadget4
+    formatting.
     """
     if simname == "csiborg1":
         reader = CSiBORG1Reader(nsim, "initial")
@@ -644,9 +707,7 @@ def process_initial_snapshot(nsim, simname):
         reader = QuijoteReader(nsim, "initial")
         output_snap_final = QuijoteReader(nsim, "final").output_snap
     elif "csiborg2" in simname:
-        reader = CSiBORG2Reader(nsim, "initial", simname.split("_")[1])
-        output_snap_final = CSiBORG2Reader(nsim, "final", simname.split("_")[1]).output_snap  # noqa
-        raise RuntimeError("TODO Not implemented.")
+        return process_initial_snapshot_csiborg2(nsim, simname)
     else:
         raise RuntimeError(f"Simulation `{simname}` is not supported.")
 
@@ -695,6 +756,76 @@ def process_initial_snapshot(nsim, simname):
                          **hdf5plugin.Blosc(**BLOSC_KWARGS))
 
 
+def process_initial_snapshot_csiborg2(nsim, simname):
+    """
+    Sort the initial snapshot particles according to their final snapshot and
+    add them to the final snapshot's HDF5 file.
+    """
+    if "csiborg2" not in simname:
+        raise RuntimeError(f"Simulation `{simname}` is not supported in this CSiBORG2 reader.")  # noqa
+
+    reader_initial = CSiBORG2Reader(nsim, "initial", simname.split("_")[1])
+    reader_final = CSiBORG2Reader(nsim, "final", simname.split("_")[1])
+
+    print("---- Processing Initial Snapshot Information ----")
+    print(f"Simulation index:      {nsim}")
+    print(f"Simulation name:       {simname}")
+    print(f"Output snapshot:       {reader_initial.output_snap}")
+    print("-----------------------------------------------")
+    print(flush=True)
+
+    print(f"{now()}: loading and sorting the initial PID.")
+    pids_high, pids_low = reader_initial.read_snapshot("pid")
+    sort_indxs_high = numpy.argsort(pids_high)
+    sort_indxs_low = numpy.argsort(pids_low)
+    del pids_high, pids_low
+    collect()
+
+    print(f"{now()}: loading the final particles.")
+    with File(reader_final.source_dir, "r") as f:
+        sort_indxs_final_high = f["PartType1/ParticleIDs"][:]
+        sort_indxs_final_low = f["PartType5/ParticleIDs"][:]
+
+    print(f"{now()}: sorting the particles according to the final snapshot.")
+    sort_indxs_final_high = numpy.argsort(numpy.argsort(sort_indxs_final_high))
+    sort_indxs_high = sort_indxs_high[sort_indxs_final_high]
+
+    sort_indxs_final_low = numpy.argsort(numpy.argsort(sort_indxs_final_low))
+    sort_indxs_low = sort_indxs_low[sort_indxs_final_low]
+
+    del sort_indxs_final_high, sort_indxs_final_low
+    collect()
+
+    # Make a copy of the initial snapshot without copying the high- and low-
+    # resolution particles.
+    print(f"{now()}: loading, sorting and writing the initial particles.")
+    src_fname = reader_initial.source_dir
+    dest_fname = reader_initial.output_snap
+    copy_hdf5_file(src_fname, dest_fname,
+                   exclude_headers=["PartType1", "PartType5"])
+
+    kinds = ["Coordinates", "ParticleIDs", "Velocities"]
+    with File(dest_fname, 'r+') as dest, File(src_fname, 'r') as src:
+        # Write and sort the high-resolution particles
+        grp_dest = dest.create_group("PartType1")
+        grp_source = src["PartType1"]
+
+        for kind in kinds:
+            grp_dest.create_dataset(
+                kind, data=grp_source[kind][...][sort_indxs_high],
+                **hdf5plugin.Blosc(**BLOSC_KWARGS))
+
+        # Write and sort the low-resolution particles
+        grp_dest = dest.create_group("PartType5")
+        grp_source = src["PartType5"]
+
+        # Read the data up to the specified index
+        for kind in kinds + ["Masses"]:
+            grp_dest.create_dataset(
+                kind, data=grp_source[kind][...][sort_indxs_low],
+                **hdf5plugin.Blosc(**BLOSC_KWARGS))
+
+
 ###############################################################################
 #         Process the initial snapshot and sort it like the final snapshot    #
 ###############################################################################
@@ -705,11 +836,15 @@ if __name__ == "__main__":
     parser.add_argument("--nsim", type=int, required=True,
                         help="Simulation index.")
     parser.add_argument("--simname", type=str, required=True,
-                        choices=["csiborg1", "quijote"],
+                        choices=["csiborg1", "quijote", "csiborg2_main",
+                                 "csiborg2_random", "csiborg2_varysmall"],
                         help="Simulation name.")
     parser.add_argument("--mode", type=int, required=True, choices=[0, 1, 2],
                         help="0: process final snapshot, 1: process initial snapshot, 2: process both.")  # noqa
     args = parser.parse_args()
+
+    if "csiborg2" in args.simname and args.mode in [0, 2]:
+        raise RuntimeError("Processing the final snapshot for CSiBORG2 is not supported.")  # noqa
 
     if args.mode == 0:
         process_final_snapshot(args.nsim, args.simname)
