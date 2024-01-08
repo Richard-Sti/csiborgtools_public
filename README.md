@@ -15,9 +15,11 @@ Tools for analysing the suite of Constrained Simulations in BORG (CSiBORG) simul
 - [ ] Check and verify the density field of galaxy colours (cannot do this now! Glamdring is super slow.)
 
 #### Calculated data
-##### SPH-density & velocity field:
+##### SPH-density & velocity field
 - *CSiBORG2_main*, *CSiBORG2_random*, *CSiBORG2_varysmall*
 - Evaluated for SDSS and SDSSxALFALFA in: *CSiBORG2_main*, *CSiBORG2_random*
+
+#### Radial velocity field
 
 
 ### Mass-assembly of massive clusters
