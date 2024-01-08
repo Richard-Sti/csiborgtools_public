@@ -30,7 +30,21 @@ from utils import get_nsims
 
 
 def density_field(nsim, parser_args):
-    """Calculate the density field."""
+    """
+    Calculate and save the density field from the particle positions and
+    masses.
+
+    Parameters
+    ----------
+    nsim : int
+        Simulation index.
+    parser_args : argparse.Namespace
+        Command line arguments.
+
+    Returns
+    -------
+    density_field : 3-dimensional array
+    """
     if parser_args.MAS == "SPH":
         raise NotImplementedError("SPH is not implemented here. Use cosmotool")
 
@@ -70,7 +84,21 @@ def density_field(nsim, parser_args):
 
 
 def velocity_field(nsim, parser_args):
-    """Calculate the velocity field."""
+    """
+    Calculate and save the velocity field from the particle positions,
+    velocities and masses.
+
+    Parameters
+    ----------
+    nsim : int
+        Simulation index.
+    parser_args : argparse.Namespace
+        Command line arguments.
+
+    Returns
+    -------
+    velocity_field : 4-dimensional array
+    """
     if parser_args.MAS == "SPH":
         raise NotImplementedError("SPH is not implemented here. Use cosmotool")
 
@@ -81,7 +109,7 @@ def velocity_field(nsim, parser_args):
         snapshot = csiborgtools.read.CSIBORG1Snapshot(nsim, nsnap, paths)
     elif "csiborg2" in parser_args.simname:
         kind = parser_args.simname.split("_")[-1]
-        snapshot = csiborgtools.read.CSIBORG2Snapshot(nsim, nsnap, paths, kind)
+        snapshot = csiborgtools.read.CSIBORG2Snapshot(nsim, nsnap, kind, paths)
     elif parser_args.simname == "quijote":
         snapshot = csiborgtools.read.QuijoteSnapshot(nsim, nsnap, paths)
     else:
@@ -108,14 +136,27 @@ def velocity_field(nsim, parser_args):
 
 
 def radvel_field(nsim, parser_args):
-    """Calculate the radial velocity field."""
+    """
+    Calculate and save the radial velocity field.
+
+    Parameters
+    ----------
+    nsim : int
+        Simulation index.
+    parser_args : argparse.Namespace
+        Command line arguments.
+
+    Returns
+    -------
+    radvel_field : 3-dimensional array
+    """
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
 
     if parser_args.simname == "csiborg1":
         field = csiborgtools.read.CSiBORG1Field(nsim, paths)
     elif "csiborg2" in parser_args.simname:
         kind = parser_args.simname.split("_")[-1]
-        field = csiborgtools.read.CSiBORG2Field(nsim, paths, kind)
+        field = csiborgtools.read.CSiBORG2Field(nsim, kind, paths)
     elif parser_args.simname == "quijote":
         field = csiborgtools.read.QuijoteField(nsim, paths)
     else:
@@ -136,11 +177,22 @@ def radvel_field(nsim, parser_args):
 def observer_peculiar_velocity(nsim, parser_args):
     """
     Calculate the peculiar velocity of an observer in the centre of the box
-    for several smoothing scales.
+    for several hard-coded smoothing scales.
+
+    Parameters
+    ----------
+    nsim : int
+        Simulation index.
+    parser_args : argparse.Namespace
+        Command line arguments.
+
+    Returns
+    -------
+    observer_vp : 4-dimensional array
     """
     boxsize = csiborgtools.simname2boxsize(parser_args.simname)
-    # NOTE thevse values are hard-coded.
-    smooth_scales = numpy.array([0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+    # NOTE these values are hard-coded.
+    smooth_scales = numpy.array([0., 2.0, 4.0, 8.0, 16.])
     smooth_scales /= boxsize
 
     if parser_args.simname == "csiborg1":

@@ -249,17 +249,18 @@ class VelocityField(BaseField):
             batch_vel = force_single_precision(batch_vel)
             batch_mass = force_single_precision(batch_mass)
 
-            vel *= mass.reshape(-1, 1)
+            batch_vel *= batch_mass.reshape(-1, 1)
 
             for i in range(3):
-                MASL.MA(pos, rho_vel[i], self.boxsize, self.MAS, W=vel[:, i],
-                        verbose=False)
+                MASL.MA(batch_pos, rho_vel[i], self.boxsize, self.MAS,
+                        W=batch_vel[:, i], verbose=False)
 
-            MASL.MA(pos, cellcounts, self.boxsize, self.MAS, W=mass,
-                    verbose=False)
+            MASL.MA(batch_pos, cellcounts, self.boxsize, self.MAS,
+                    W=batch_mass, verbose=False)
 
             if end == nparts:
                 break
+
             start = end
 
         for i in range(3):
@@ -272,7 +273,7 @@ class VelocityField(BaseField):
 def radial_velocity(rho_vel, observer_velocity):
     """
     Calculate the radial velocity field around the observer in the centre
-    of the box.
+    of the box, such that the observer velocity is 0.
 
     Parameters
     ----------

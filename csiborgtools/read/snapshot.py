@@ -516,10 +516,12 @@ class BaseField(ABC):
     Base class for reading fields such as density or velocity fields.
     """
     def __init__(self, nsim, paths):
+        if isinstance(nsim, numpy.integer):
+            nsim = int(nsim)
         if not isinstance(nsim, int):
-            raise TypeError("`nsim` must be an integer")
-        self._nsim = nsim
+            raise TypeError(f"`nsim` must be an integer. Received `{type(nsim)}`.")  # noqa
 
+        self._nsim = nsim
         self._paths = paths
 
     @property
@@ -542,6 +544,8 @@ class BaseField(ABC):
         -------
         Paths
         """
+        if self._paths is None:
+            self._paths = Paths(**paths_glamdring)
         return self._paths
 
     @abstractmethod
@@ -594,11 +598,12 @@ class CSiBORG1Field(BaseField):
     ----------
     nsim : int
         Simulation index.
-    paths : Paths
-        Paths object.
+    paths : Paths, optional
+        Paths object. By default, the paths are set to the `glamdring` paths.
     """
-    def __init__(self, nsim, paths):
+    def __init__(self, nsim, paths=None):
         super().__init__(nsim, paths)
+        self._simname = "csiborg1"
 
     def density_field(self, MAS, grid):
         fpath = self.paths.field("density", MAS, grid, self.nsim, "csiborg1")
@@ -606,8 +611,13 @@ class CSiBORG1Field(BaseField):
         if MAS == "SPH":
             with File(fpath, "r") as f:
                 field = f["density"][:]
+                field /= (677.7 * 1e3 / grid)**3  # Convert to h^2 Msun / kpc^3
         else:
             field = numpy.load(fpath)
+
+        # Flip x- and z-axes
+        if self._simname == "csiborg1":
+            field = field.T
 
         return field
 
@@ -623,6 +633,13 @@ class CSiBORG1Field(BaseField):
             field = numpy.array([v0, v1, v2])
         else:
             field = numpy.load(fpath)
+
+        # Flip x- and z-axes
+        if self._simname == "csiborg1":
+            field[0, ...] = field[0, ...].T
+            field[1, ...] = field[1, ...].T
+            field[2, ...] = field[2, ...].T
+            field[[0, 2], ...] = field[[2, 0], ...]
 
         return field
 
@@ -640,13 +657,13 @@ class CSiBORG2Field(BaseField):
     ----------
     nsim : int
         Simulation index.
-    paths : Paths
-        Paths object.
     kind : str
         CSiBORG2 run kind. One of `main`, `random`, or `varysmall`.
+    paths : Paths, optional
+        Paths object. By default, the paths are set to the `glamdring` paths.
     """
 
-    def __init__(self, nsim, paths, kind):
+    def __init__(self, nsim, kind, paths=None):
         super().__init__(nsim, paths)
         self.kind = kind
 
@@ -675,11 +692,11 @@ class CSiBORG2Field(BaseField):
             with File(fpath, "r") as f:
                 field = f["density"][:]
             field *= 1e10                     # Convert to Msun / h
-            field /= (676.6 * 1e3 / 1024)**3  # Convert to h^2 Msun / kpc^3
-            field = field.T                   # Flip x- and z-axes
+            field /= (676.6 * 1e3 / grid)**3  # Convert to h^2 Msun / kpc^3
         else:
             field = numpy.load(fpath)
 
+        field = field.T                       # Flip x- and z-axes
         return field
 
     def velocity_field(self, MAS, grid):
@@ -688,7 +705,6 @@ class CSiBORG2Field(BaseField):
 
         if MAS == "SPH":
             with File(fpath, "r") as f:
-                # TODO: the x and z still have to be flipped.
                 density = f["density"][:]
                 v0 = f["p0"][:] / density
                 v1 = f["p1"][:] / density
@@ -696,6 +712,12 @@ class CSiBORG2Field(BaseField):
             field = numpy.array([v0, v1, v2])
         else:
             field = numpy.load(fpath)
+
+        # Flip x- and z-axes
+        field[0, ...] = field[0, ...].T
+        field[1, ...] = field[1, ...].T
+        field[2, ...] = field[2, ...].T
+        field[[0, 2], ...] = field[[2, 0], ...]
 
         return field
 
@@ -718,6 +740,7 @@ class QuijoteField(CSiBORG1Field):
     """
     def __init__(self, nsim, paths):
         super().__init__(nsim, paths)
+        self._simname = "quijote"
 
 
 ###############################################################################
