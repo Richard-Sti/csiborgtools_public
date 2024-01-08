@@ -85,16 +85,11 @@ if __name__ == "__main__":
     if args.snapshot_kind != "ramses":
         raise NotImplementedError("Only RAMSES snapshots are supported.")
 
-    particles_path = join(args.scratch_space,
-                          f"ramses_{str(args.nsim).zfill(5)}.hdf5")
-    output_path = join(args.output_folder,
-                       f"sph_ramses_{str(args.nsim).zfill(5)}.hdf5")
-
     print("---------- SPH Density & Velocity Field Job Information ----------")
     print(f"Mode:              {args.mode}")
     print(f"Simulation index:  {args.nsim}")
-    print(f"Paticles path:     {particles_path}")
-    print(f"Output path:       {output_path}")
+    print(f"Scratch space:     {args.scratch_space}")
+    print(f"Output folder:     {args.output_folder}")
     print(f"Resolution:        {args.resolution}")
     print(f"SPH executable:    {args.SPH_executable}")
     print(f"Snapshot kind:     {args.snapshot_kind}")
@@ -102,8 +97,20 @@ if __name__ == "__main__":
     print(flush=True)
 
     if args.mode == "prepare":
-        prepare_csiborg1(args.nsim, particles_path)
+        if args.nsim == -1:
+            nsims = [7444 + n * 24 for n in range(101)]
+            for nsim in nsims:
+                print(f"Processing simulation {nsim}.")
+                particles_path = join(args.scratch_space,
+                                      f"ramses_{str(nsim).zfill(5)}.hdf5")
+                prepare_csiborg1(nsim, particles_path)
+        else:
+            particles_path = join(args.scratch_space,
+                                  f"ramses_{str(args.nsim).zfill(5)}.hdf5")
+            prepare_csiborg1(args.nsim, particles_path)
     elif args.mode == "run":
+        particles_path = join(args.scratch_space,
+                              f"ramses_{str(args.nsim).zfill(5)}.hdf5")
         output_path = join(args.output_folder,
                            f"sph_ramses_{str(args.nsim).zfill(5)}.hdf5")
         boxsize = 677.7
