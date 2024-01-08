@@ -9,9 +9,10 @@ Tools for analysing the suite of Constrained Simulations in BORG (CSiBORG) simul
 - [ ] Improve the storage system for overlaps and calculate it for all simulations.
 
 ### Enviromental dependence of galaxy properties
-- [ ] Calculate the SPH density field for CSiBORG1.
+- [ ] Prepare the CSiBORG one particle files for SPH.
+- [ ] Transfer, calculate the SPH density field for CSiBORG1 and transfer back.
 - [x] Check that the velocity-field flipping of x and z coordinates is correct.
-- [ ] Evaluate and share the density field for SDSS & SDSSxALFALFA for both CSiBORG2 and random fields.
+- [x] Evaluate and share the density field for SDSS and SDSSxALFALFA for both CSiBORG2 and random fields.
 - [ ] Check and verify the density field of galaxy colours (cannot do this now! Glamdring is super slow.)
 
 #### Calculated data
