@@ -19,7 +19,7 @@ from argparse import ArgumentParser
 from datetime import datetime
 from gc import collect
 from os import makedirs, remove, rmdir
-from os.path import exists, isdir, join
+from os.path import exists, join
 
 import csiborgtools
 import numpy as np
@@ -229,9 +229,6 @@ if __name__ == "__main__":
     parser.add_argument("--grid", type=int, help="Grid resolution.")
     args = parser.parse_args()
 
-    out_folder = "/mnt/extraspace/rstiskalek/csiborg_postprocessing/field_los"
-    dump_folder = join(out_folder,
-                       f"temp_{str(datetime.now())}".replace(" ", "_"))
     rmax = 200
     dr = 0.1
     smooth_scales = None
@@ -240,10 +237,16 @@ if __name__ == "__main__":
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     nsims = get_nsims(args, paths)
 
+    out_folder = "/mnt/extraspace/rstiskalek/csiborg_postprocessing/field_los"
     # Create the dumping folder.
-    if comm.Get_rank() == 0 and not isdir(dump_folder):
+    if comm.Get_rank() == 0:
+        dump_folder = join(out_folder,
+                           f"temp_{str(datetime.now())}".replace(" ", "_"))
         print(f"Creating folder `{dump_folder}`.")
         makedirs(dump_folder)
+    else:
+        dump_folder = None
+    dump_folder = comm.bcast(dump_folder, root=0)
 
     # Get the line of sight RA/dec coordinates.
     pos = get_los(args.catalogue, comm)
