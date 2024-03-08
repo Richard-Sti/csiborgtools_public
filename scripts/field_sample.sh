@@ -1,5 +1,5 @@
-nthreads=1
-memory=32
+nthreads=11
+memory=64
 on_login=${1}
 queue="berg"
 env="/mnt/zfsusers/rstiskalek/csiborgtools/venv_csiborg/bin/python"
@@ -7,11 +7,11 @@ file="field_sample.py"
 
 
 nsims="-1"
-simname="TNG300-1"
-survey="TNG300-1"
+simname="csiborg1"
+survey="SDSS"
 smooth_scales="0 2 4 8 16"
 kind="density"
-MAS="PCS"
+MAS="SPH"
 grid=1024
 scatter=0
 

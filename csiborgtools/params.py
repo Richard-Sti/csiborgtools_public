@@ -13,7 +13,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """
-Various user parameters for csiborgtools.
+Various user parameters for CSiBORGTools.
 """
 
 
@@ -37,7 +37,8 @@ def simname2boxsize(simname):
          "borg1": 677.7,
          "borg2": 676.6,
          "quijote": 1000.,
-         "TNG300-1": 205.
+         "TNG300-1": 205.,
+         "Carrick2015": 400.,
          }
 
     boxsize = d.get(simname, None)
@@ -46,6 +47,32 @@ def simname2boxsize(simname):
         raise ValueError("Unknown simname: {}".format(simname))
 
     return boxsize
+
+
+def simname2Omega_m(simname):
+    """
+    Return Omega_m for a given simname.
+
+    Parameters
+    ----------
+    simname : str
+        Simulation name.
+
+    Returns
+    -------
+    Omega_m: float
+    """
+    d = {"csiborg1": 0.307,
+         "borg1": 0.307,
+         "Carrick2015": 0.3,
+         }
+
+    omega_m = d.get(simname, None)
+
+    if omega_m is None:
+        raise ValueError("Unknown simname: {}".format(simname))
+
+    return omega_m
 
 
 paths_glamdring = {

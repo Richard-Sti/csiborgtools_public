@@ -12,14 +12,15 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-from csiborgtools import clustering, field, halo, match, read, summary          # noqa
+from csiborgtools import clustering, field, flow, halo, match, read, summary    # noqa
 
 from .utils import (center_of_mass, delta2ncells, number_counts,                # noqa
                     periodic_distance, periodic_distance_two_points,            # noqa
                     binned_statistic, cosine_similarity, fprint,                # noqa
                     hms_to_degrees, dms_to_degrees, great_circle_distance,      # noqa
-                    radec_to_cartesian, cartesian_to_radec)                     # noqa
-from .params import paths_glamdring, simname2boxsize                            # noqa
+                    radec_to_cartesian, cartesian_to_radec,                     # noqa
+                    thin_samples_by_acl)                                        # noqa
+from .params import paths_glamdring, simname2boxsize, simname2Omega_m           # noqa
 
 
 ###############################################################################

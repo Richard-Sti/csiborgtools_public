@@ -1,19 +1,16 @@
-nthreads=11
-memory=64
+memory=4
 on_login=${1}
+nthreads=${2}
 queue="berg"
 env="/mnt/users/rstiskalek/csiborgtools/venv_csiborg/bin/python"
-file="field_los.py"
+file="flow_validation.py"
 
 catalogue="A2"
-# catalogue="csiborg1_9844"
-nsims="-1"
-simname="csiborg1"
-MAS="SPH"
-grid=1024
+simname="Carrick2015"
+ksmooth=2
 
 
-pythoncm="$env $file --catalogue $catalogue --nsims $nsims --simname $simname --MAS $MAS --grid $grid"
+pythoncm="$env $file --catalogue $catalogue --simname $simname --ksmooth $ksmooth"
 if [ $on_login -eq 1 ]; then
     echo $pythoncm
     $pythoncm
