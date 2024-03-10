@@ -30,7 +30,7 @@ from numpyro.infer import MCMC, NUTS
 from taskmaster import work_delegation  # noqa
 
 
-def get_model(args, nsim):
+def get_model(args, nsim_iterator):
     """
     Load the data and create the NumPyro model.
 
@@ -38,8 +38,8 @@ def get_model(args, nsim):
     ----------
     args : argparse.Namespace
         Command line arguments.
-    nsim : int
-        Simulation index.
+    nsim_iterator : int
+        Simulation index, not the IC index. Ranges from 0, ... .
 
     Returns
     -------
@@ -58,8 +58,8 @@ def get_model(args, nsim):
     Omega_m = csiborgtools.simname2Omega_m(args.simname)
 
     # Read in the data from the loader.
-    los_overdensity = loader.los_density[:, nsim, :]
-    los_velocity = loader.los_radial_velocity[:, nsim, :]
+    los_overdensity = loader.los_density[:, nsim_iterator, :]
+    los_velocity = loader.los_radial_velocity[:, nsim_iterator, :]
 
     RA = loader.cat["RA"]
     dec = loader.cat["DEC"]
@@ -186,7 +186,7 @@ if __name__ == "__main__":
     nsims = paths.get_ics(args.simname)
 
     nsteps = 5000
-    nchains = 1
+    nchains = 4
 
     # Create the dumping folder.
     if comm.Get_rank() == 0:
@@ -198,12 +198,13 @@ if __name__ == "__main__":
         dump_folder = None
     dump_folder = comm.bcast(dump_folder, root=0)
 
-    def main(nsim):
-        model = get_model(args, nsim)
-        run_model(model, nsteps, nchains, nsim, dump_folder,
+    def main(i):
+        model = get_model(args, i)
+        run_model(model, nsteps, nchains, nsims[i], dump_folder,
                   show_progress=size == 1)
 
-    work_delegation(main, nsims, comm, master_verbose=True)
+    work_delegation(main, [i for i in range(len(nsims))], comm,
+                    master_verbose=True)
     comm.Barrier()
 
     if rank == 0:
