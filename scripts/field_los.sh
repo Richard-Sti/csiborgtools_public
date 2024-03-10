@@ -5,7 +5,7 @@ queue="berg"
 env="/mnt/users/rstiskalek/csiborgtools/venv_csiborg/bin/python"
 file="field_los.py"
 
-catalogue="A2"
+catalogue="LOSS"
 # catalogue="csiborg1_9844"
 nsims="-1"
 simname="csiborg1"
