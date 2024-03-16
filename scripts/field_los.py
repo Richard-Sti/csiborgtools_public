@@ -58,7 +58,8 @@ def get_los(catalogue_name, simname, comm):
     if comm.Get_rank() == 0:
         folder = "/mnt/extraspace/rstiskalek/catalogs"
 
-        if catalogue_name == "LOSS" or catalogue_name == "Foundation":
+        if catalogue_name in ["LOSS", "Foundation", "SFI_gals", "2MTF",
+                              "Pantheon+"]:
             fpath = join(folder, "PV_compilation_Supranta2019.hdf5")
             with File(fpath, 'r') as f:
                 grp = f[catalogue_name]
@@ -69,18 +70,6 @@ def get_los(catalogue_name, simname, comm):
             with File(fpath, 'r') as f:
                 RA = f["RA"][:]
                 dec = f["DEC"][:]
-        elif "csiborg1" in catalogue_name:
-            nsim = int(catalogue_name.split("_")[-1])
-            cat = csiborgtools.read.CSiBORG1Catalogue(
-                nsim, bounds={"totmass": (1e13, None)})
-
-            seed = 42
-            gen = np.random.default_rng(seed)
-            mask = gen.choice(len(cat), size=100, replace=False)
-
-            sph_pos = cat["spherical_pos"]
-            RA = sph_pos[mask, 1]
-            dec = sph_pos[mask, 2]
         else:
             raise ValueError(f"Unknown field name: `{catalogue_name}`.")
 
@@ -122,6 +111,9 @@ def get_field(simname, nsim, kind, MAS, grid):
     # Open the field reader.
     if simname == "csiborg1":
         field_reader = csiborgtools.read.CSiBORG1Field(nsim)
+    elif "csiborg2" in simname:
+        simkind = simname.split("_")[-1]
+        field_reader = csiborgtools.read.CSiBORG2Field(nsim, simkind)
     elif simname == "Carrick2015":
         folder = "/mnt/extraspace/rstiskalek/catalogs"
         warn(f"Using local paths from `{folder}`.", RuntimeWarning)
@@ -130,7 +122,20 @@ def get_field(simname, nsim, kind, MAS, grid):
             return np.load(fpath).astype(np.float32)
         elif kind == "velocity":
             fpath = join(folder, "twompp_velocity_carrick2015.npy")
-            return np.load(fpath).astype(np.float32)
+            field = np.load(fpath).astype(np.float32)
+
+            # Because the Carrick+2015 data is in the following form:
+            # "The velocities are predicted peculiar velocities in the CMB
+            # frame in Galactic Cartesian coordinates, generated from the
+            # \(\delta_g^*\) field with \(\beta^* = 0.43\) and an external
+            # dipole \(V_\mathrm{ext} = [89,-131,17]\) (Carrick et al Table 3)
+            # has already been added.""
+            field[0] -= 89
+            field[1] -= -131
+            field[2] -= 17
+            field /= 0.43
+
+            return field
         else:
             raise ValueError(f"Unknown field kind: `{kind}`.")
     else:
@@ -274,7 +279,7 @@ if __name__ == "__main__":
 
     rmax = 200
     dr = 0.5
-    smooth_scales = [0, 2, 4, 6]
+    smooth_scales = [0, 2]
 
     comm = MPI.COMM_WORLD
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
