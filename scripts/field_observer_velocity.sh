@@ -1,17 +1,13 @@
-nthreads=1
-memory=32
-on_login=${1}
+nthreads=5
+memory=40
+on_login=0
 queue="berg"
 env="/mnt/zfsusers/rstiskalek/csiborgtools/venv_csiborg/bin/python"
-file="field_shells.py"
+file="field_observer_velocity.py"
 
-field="overdensity"
-simname="borg2"
-MAS="SPH"
-grid=1024
+simname=${1}
 
-
-pythoncm="$env $file --field $field --simname $simname --MAS $MAS --grid $grid"
+pythoncm="$env $file --simname $simname"
 if [ $on_login -eq 1 ]; then
     echo $pythoncm
     $pythoncm
