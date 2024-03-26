@@ -1,5 +1,5 @@
 memory=4
-on_login=1
+on_login=0
 nthreads=${1}
 ksmooth=${2}
 
@@ -7,8 +7,8 @@ queue="berg"
 env="/mnt/users/rstiskalek/csiborgtools/venv_csiborg/bin/python"
 file="flow_validation.py"
 
-catalogue="LOSS"
-simname="Carrick2015"
+catalogue="SFI_groups"
+simname="csiborg2_main"
 
 
 pythoncm="$env $file --catalogue $catalogue --simname $simname --ksmooth $ksmooth"
