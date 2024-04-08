@@ -17,6 +17,7 @@
 import csiborgtools
 import numpy as np
 from tqdm import tqdm
+from h5py import File
 
 
 def calculate_hmf(simname, bin_edges, halofinder="FOF", max_distance=135):
@@ -44,5 +45,22 @@ def calculate_hmf(simname, bin_edges, halofinder="FOF", max_distance=135):
             raise ValueError(f"Unknown simname: {simname}")
 
         hmf[i] = cat.halo_mass_function(bin_edges, volume, "totmass")[1]
+
+    return hmf
+
+
+def MDPL2_HMF(bin_edges):
+    """MDPL2 FoF halo mass function."""
+    fname = "/mnt/extraspace/rstiskalek/catalogs/MDPL2_FOF_125.hdf5"
+    with File(fname, "r") as f:
+        mass = f["mass"][:]
+
+    dx = np.diff(np.log10(bin_edges))
+    if not np.all(np.isclose(dx, dx[0])):
+        raise ValueError("Bin edges must be logarithmically spaced.")
+    dx = dx[0]
+
+    hmf = csiborgtools.number_counts(mass, bin_edges)
+    hmf /= 1000**3 * dx
 
     return hmf
