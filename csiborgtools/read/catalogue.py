@@ -23,6 +23,7 @@ from functools import lru_cache
 from gc import collect
 from itertools import product
 from math import floor
+from astropy.cosmology import FlatLambdaCDM
 
 import numpy
 from h5py import File
@@ -30,7 +31,8 @@ from sklearn.neighbors import NearestNeighbors
 
 from ..params import paths_glamdring
 from ..utils import (cartesian_to_radec, great_circle_distance, number_counts,
-                     periodic_distance_two_points, real2redshift)
+                     periodic_distance_two_points, real2redshift,
+                     radec_to_galactic)
 from .paths import Paths
 from .snapshot import is_instance_of_base_snapshot_subclass
 
@@ -46,6 +48,7 @@ class BaseCatalogue(ABC):
     """
     _properties = ["cartesian_pos",
                    "spherical_pos",
+                   "galactic_pos",
                    "dist",
                    "cartesian_redshiftspace_pos",
                    "spherical_redshiftspace_pos",
@@ -596,6 +599,9 @@ class BaseCatalogue(ABC):
             elif key == "spherical_pos":
                 out = cartesian_to_radec(
                     self["__cartesian_pos"] - self.observer_location)
+            elif key == "galactic_pos":
+                out = self["__spherical_pos"]
+                out[:, 1], out[:, 2] = radec_to_galactic(out[:, 1], out[:, 2])
             elif key == "dist":
                 out = numpy.linalg.norm(
                     self["__cartesian_pos"] - self.observer_location, axis=1)
@@ -985,7 +991,6 @@ class CSiBORG2MergerTreeReader:
         group2treeid : dict
             Dictionary with group number as key and tree ID as value.
         """
-        print("Creating group to tree ID mapping...")
         with File(self.paths.trees(self.nsim, self.simname), 'r') as f:
             groupnr = f["TreeHalos/GroupNr"][:]
             snapnum = f["TreeHalos/SnapNum"][:]
@@ -1020,6 +1025,11 @@ class CSiBORG2MergerTreeReader:
                         "TreeNextProgenitor",
                         "TreeProgenitor",
                         "SubhaloMass",
+                        "Group_M_Crit200",
+                        "SubhaloSpin",
+                        "SubhaloVmax",
+                        "SubhaloHalfmassRad",
+                        "SubhaloVmaxRad",
                         ]
 
         with File(self.paths.trees(self.nsim, self.simname), 'r') as f:
@@ -1082,44 +1092,58 @@ class CSiBORG2MergerTreeReader:
 
         n = first_fof  # Index of the current main progenitor
 
-        time, redshift, main_progenitor_mass = [], [], []
-        max_next_progenitor_mass, total_next_progenitor_mass = [], []
+        snap_num, redshift, main_progenitor_mass, group_m200c = [], [], [], []
+        main_progenitor_vmax, main_progenitor_spin = [], []
+        main_progenitor_vmaxrad, main_progenitor_halfmassrad = [], []
         while True:
-            # First off attempt to find the next progenitors of the current
-            # halo. Deal with the main progenitor later.
-            next_prog = tree["TreeNextProgenitor"][n]
-            if next_prog != -1:
-                minors = []
-                while True:
-                    minors.append(tree["SubhaloMass"][next_prog])
+            # NOTE: 'Minors' are ignored. This is only relevant if we wanted
+            # to find the other subhaloes in the current FoF group.
 
-                    next_prog = tree["TreeNextProgenitor"][next_prog]
+            # # First off attempt to find the next progenitors of the current
+            # # halo. Deal with the main progenitor later.
+            # next_prog = tree["TreeNextProgenitor"][n]
+            # if next_prog != -1:
+            #     minors = []
+            #     while True:
+            #         minors.append(tree["SubhaloMass"][next_prog])
 
-                    if next_prog == -1:
-                        break
-            else:
-                # Fiducially set it to zero.
-                minors = [0]
+            #         next_prog = tree["TreeNextProgenitor"][next_prog]
+
+            #         if next_prog == -1:
+            #             break
+            # else:
+            #     # Fiducially set it to zero.
+            #     minors = [0]
 
             # Update data with information from the current main progenitor.
             major = tree["SubhaloMass"][n]
             main_progenitor_mass.append(major)
-            max_next_progenitor_mass.append(max(minors))
-            total_next_progenitor_mass.append(sum(minors))
+            group_m200c.append(tree["Group_M_Crit200"][n])
+            main_progenitor_vmax.append(tree["SubhaloVmax"][n])
+            main_progenitor_spin.append(tree["SubhaloSpin"][n])
+            main_progenitor_vmaxrad.append(tree["SubhaloVmaxRad"][n])
+            main_progenitor_halfmassrad.append(tree["SubhaloHalfmassRad"][n])
+            snap_num.append(tree["SnapNum"][n])
             redshift.append(tree["Redshift"][tree["SnapNum"][n]])
-            time.append(tree["Time"][tree["SnapNum"][n]])
 
-            # Update n to the next main progenitor.
+            # Update `n` to the next main progenitor.
             n = tree["TreeMainProgenitor"][n]
 
             if n == -1:
                 break
 
-        return {"Time": numpy.array(time),
+        # For calculating age of the Universe at each redshift.
+        cosmo = FlatLambdaCDM(H0=67.66, Om0=0.3111)
+
+        return {"SnapNum": numpy.array(snap_num, dtype=numpy.int32),
+                "Age": numpy.array(cosmo.age(redshift).value),
                 "Redshift": numpy.array(redshift),
+                "Group_M_Crit200": numpy.array(group_m200c) * 1e10,
                 "MainProgenitorMass": numpy.array(main_progenitor_mass) * 1e10,
-                "MaxNextProgenitorMass": numpy.array(max_next_progenitor_mass) * 1e10,  # noqa
-                "TotalNextProgenitorMass": numpy.array(total_next_progenitor_mass) * 1e10,  # noqa
+                "MainProgenitorVmax": numpy.array(main_progenitor_vmax),
+                "MainProgenitorSpin": numpy.array(main_progenitor_spin),
+                "MainProgenitorVmaxRad": numpy.array(main_progenitor_vmaxrad),
+                "MainProgenitorHalfmassRad": numpy.array(main_progenitor_halfmassrad),      # noqa
                 }
 
 
@@ -1148,7 +1172,6 @@ class CSiBORG2SUBFINDCatalogue(BaseCatalogue):
     """
     def __init__(self, nsim, nsnap, kind, paths=None,
                  bounds=None, flip_xz=True, cache_maxsize=64):
-        # TODO: finish all this!
         super().__init__()
         super().init_with_snapshot(
             f"csiborg2_{kind}", nsim, nsnap, paths, None, bounds,
@@ -1156,7 +1179,8 @@ class CSiBORG2SUBFINDCatalogue(BaseCatalogue):
             cache_maxsize)
 
         self._custom_keys = ["SubhaloSpin", "SubhaloVelDisp", "Central",
-                             "ParentMass"]
+                             "SubhaloVmax", "SubhaloVmaxRad",
+                             "SubhaloHalfmassRad", "ParentMass"]
 
     @property
     def kind(self):
@@ -1234,6 +1258,18 @@ class CSiBORG2SUBFINDCatalogue(BaseCatalogue):
     @property
     def SubhaloVelDisp(self):
         return self._read_subfind_catalogue("SubhaloVelDisp")
+
+    @property
+    def SubhaloVmax(self):
+        return self._read_subfind_catalogue("SubhaloVmax")
+
+    @property
+    def SubhaloVmaxRad(self):
+        return self._read_subfind_catalogue("SubhaloVmaxRad")
+
+    @property
+    def SubhaloHalfmassRad(self):
+        return self._read_subfind_catalogue("SubhaloHalfmassRad")
 
     @property
     def SubhaloContamination(self):

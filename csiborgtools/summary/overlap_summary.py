@@ -82,9 +82,9 @@ class PairOverlap:
         self._cat0 = cat0
         self._catx = catx
         self._paths = cat0.paths
-        self.load(cat0, catx, min_logmass, maxdist)
+        self._load(cat0, catx, min_logmass, maxdist)
 
-    def load(self, cat0, catx, paths, min_logmass, maxdist=None):
+    def _load(self, cat0, catx, min_logmass, maxdist=None):
         r"""
         Load overlap calculation results. Matches the results back to the two
         catalogues in question.
@@ -107,14 +107,13 @@ class PairOverlap:
         """
         nsim0 = cat0.nsim
         nsimx = catx.nsim
-        paths = cat0.paths
 
         # We first load in the output files. We need to find the right
         # combination of the reference and cross simulation.
-        fname = paths.overlap(cat0.simname, nsim0, nsimx, min_logmass,
-                              smoothed=False)
-        fname_inv = paths.overlap(cat0.simname, nsimx, nsim0, min_logmass,
-                                  smoothed=False)
+        fname = self._paths.overlap(cat0.simname, nsim0, nsimx, min_logmass,
+                                    smoothed=False)
+        fname_inv = self._paths.overlap(cat0.simname, nsimx, nsim0,
+                                        min_logmass, smoothed=False)
         if isfile(fname):
             data_ngp = numpy.load(fname, allow_pickle=True)
             to_invert = False
@@ -125,8 +124,8 @@ class PairOverlap:
         else:
             raise FileNotFoundError(f"No file found for {nsim0} and {nsimx}.")
 
-        fname_smooth = paths.overlap(cat0.simname, cat0.nsim, catx.nsim,
-                                     min_logmass, smoothed=True)
+        fname_smooth = self._paths.overlap(cat0.simname, cat0.nsim, catx.nsim,
+                                           min_logmass, smoothed=True)
         data_smooth = numpy.load(fname_smooth, allow_pickle=True)
 
         # Create mapping from halo indices to array positions in the catalogue.
@@ -609,6 +608,7 @@ class NPairsOverlap:
 
         self._pairs = pairs
 
+    @lru_cache()
     def max_overlap(self, min_overlap, from_smoothed, verbose=True):
         """
         Calculate maximum overlap of each halo in the reference simulation with
@@ -644,6 +644,7 @@ class NPairsOverlap:
                                        for y_ in pair.overlap(from_smoothed)])
         return numpy.vstack(out).T
 
+    @lru_cache()
     def max_overlap_key(self, key, min_overlap, from_smoothed, verbose=True):
         """
         Calculate maximum overlap mass of each halo in the reference
@@ -674,6 +675,7 @@ class NPairsOverlap:
 
         return numpy.vstack(out).T
 
+    @lru_cache()
     def summed_overlap(self, from_smoothed, verbose=True):
         """
         Calculate summed overlap of each halo in the reference simulation with
