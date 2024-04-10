@@ -92,6 +92,7 @@ def simname2boxsize(simname):
          "csiborg2_random": 676.6,
          "borg1": 677.7,
          "borg2": 676.6,
+         "borg2_all": 676.6,
          "quijote": 1000.,
          "TNG300-1": 205.,
          "Carrick2015": 400.,
@@ -123,6 +124,8 @@ def simname2Omega_m(simname):
          "csiborg2_random": 0.3111,
          "csiborg2_varysmall": 0.3111,
          "borg1": 0.307,
+         "borg2": 0.3111,
+         "borg2_all": 0.3111,
          "Carrick2015": 0.3,
          }
 
@@ -144,6 +147,7 @@ paths_glamdring = {
     "borg1_dir": "/mnt/users/hdesmond/BORG_final",
     "borg2_dir": "/mnt/extraspace/rstiskalek/BORG_STOPYRA_2023",
     "tng300_1_dir": "/mnt/extraspace/rstiskalek/TNG300-1/",
+    "aux_cat_dir": "/mnt/extraspace/rstiskalek/catalogs",
     }
 
 
