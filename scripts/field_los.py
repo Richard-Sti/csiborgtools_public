@@ -61,7 +61,7 @@ def get_los(catalogue_name, simname, comm):
         if catalogue_name in ["LOSS", "Foundation", "SFI_gals",
                               "SFI_gals_masked", "SFI_groups", "2MTF",
                               "Pantheon+"]:
-            fpath = join(folder, "PV_compilation_Supranta2019.hdf5")
+            fpath = join(folder, "PV_compilation.hdf5")
             with File(fpath, 'r') as f:
                 grp = f[catalogue_name]
                 RA = grp["RA"][:]
@@ -286,7 +286,7 @@ if __name__ == "__main__":
 
     rmax = 200
     dr = 0.5
-    smooth_scales = [0, 2]
+    smooth_scales = [0, 2, 4]
 
     comm = MPI.COMM_WORLD
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
