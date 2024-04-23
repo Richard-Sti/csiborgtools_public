@@ -86,7 +86,7 @@ def read_samples(catalogue, simname, ksmooth, include_calibration=False,
             except KeyError:
                 chi2.append([0.])
 
-            if catalogue in ["LOSS", "Foundation"]  or "Pantheon+" in catalogue:  # noqa
+            if catalogue in ["LOSS", "Foundation"] or "Pantheon+" in catalogue:  # noqa
                 alpha_cal.append(f[f"sim_{nsim}/alpha_cal"][:])
                 beta_cal.append(f[f"sim_{nsim}/beta_cal"][:])
                 mag_cal.append(f[f"sim_{nsim}/mag_cal"][:])
