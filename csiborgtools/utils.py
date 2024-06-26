@@ -26,8 +26,6 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from numba import jit
-from numpyro.infer import util
-from scipy.stats import multivariate_normal
 
 ###############################################################################
 #                           Positions                                         #
@@ -429,55 +427,127 @@ def thin_samples_by_acl(samples):
     return thinned_samples
 
 
-def numpyro_gof(model, mcmc, model_kwargs={}):
+###############################################################################
+#                            Model comparison                                 #
+###############################################################################
+
+
+def BIC_AIC(samples, log_likelihood, ndata):
     """
-    Get the goodness-of-fit statistics for a sampled Numpyro model. Calculates
-    the BIC and AIC using the maximum likelihood sampled point and the log
-    evidence using the Laplace approximation.
+    Get the BIC/AIC of HMC samples from a Numpyro model.
 
     Parameters
     ----------
-    model : numpyro model
-        The model to evaluate.
-    mcmc : numpyro MCMC
-        The MCMC object containing the samples.
-    ndata : int
-        The number of data points.
-    model_kwargs : dict, optional
-        Additional keyword arguments to pass to the model.
+    samples: dict
+        Dictionary of samples from the Numpyro MCMC object.
+    log_likelihood: numpy array
+        Log likelihood values of the samples.
+    ndata: int
+        Number of data points.
 
     Returns
     -------
-    gof : dict
-        Dictionary containing the BIC, AIC and logZ.
+    BIC, AIC: floats
     """
-    samples = mcmc.get_samples(group_by_chain=False)
-    log_likelihood = util.log_likelihood(model, samples, **model_kwargs)["ll"]
-
-    # Calculate the BIC using the maximum likelihood sampled point.
     kmax = np.argmax(log_likelihood)
-    nparam = len(samples)
-    try:
-        ndata = model.ndata
-    except AttributeError as e:
-        raise AttributeError("The model must have an attribute `ndata` "
-                             "indicating the number of data points.") from e
-    BIC = -2 * log_likelihood[kmax] + nparam * np.log(ndata)
 
-    # Calculate AIC
+    # How many parameters?
+    nparam = 0
+    for val in samples.values():
+        if val.ndim == 1:
+            nparam += 1
+        elif val.ndim == 2:
+            nparam += val.shape[-1]
+        else:
+            raise ValueError("Invalid dimensionality of samples to count the number of parameters.")  # noqa
+
+    BIC = nparam * np.log(ndata) - 2 * log_likelihood[kmax]
     AIC = 2 * nparam - 2 * log_likelihood[kmax]
 
-    # Calculate log(Z) using Laplace approximation.
-    X = np.vstack([samples[key] for key in samples.keys()]).T
-    mu, cov = multivariate_normal.fit(X)
-    test_sample = {key: mu[i] for i, key in enumerate(samples.keys())}
+    return float(BIC), float(AIC)
 
-    ll_mu = util.log_likelihood(model, test_sample, **model_kwargs)["ll"]
-    cov_det = np.linalg.det(cov)
-    D = len(mu)
-    logZ = ll_mu + 0.5 * np.log(cov_det) + D / 2 * np.log(2 * np.pi)
 
-    # Convert to float
-    out = {"BIC": BIC, "AIC": AIC, "logZ": logZ}
-    out = {key: float(val) for key, val in out.items()}
-    return out
+def dict_samples_to_array(samples):
+    """Convert a dictionary of samples to a 2-dimensional array."""
+    data = []
+    names = []
+
+    for key, value in samples.items():
+        if value.ndim == 1:
+            data.append(value)
+            names.append(key)
+        elif value.ndim == 2:
+            for i in range(value.shape[-1]):
+                data.append(value[:, i])
+                names.append(f"{key}_{i}")
+        else:
+            raise ValueError("Invalid dimensionality of samples to stack.")
+
+    return np.vstack(data).T, names
+
+
+def harmonic_evidence(samples, log_posterior, temperature=0.8, epochs_num=20,
+                      return_flow_samples=True, verbose=True):
+    """
+    Calculate the evidence using the `harmonic` package. The model has a few
+    more hyperparameters that are set to defaults now.
+
+    Parameters
+    ----------
+    samples: 3-dimensional array
+        MCMC samples of shape `(nchains, nsamples, ndim)`.
+    log_posterior: 2-dimensional array
+        Log posterior values of shape `(nchains, nsamples)`.
+    temperature: float, optional
+        Temperature of the `harmonic` model.
+    epochs_num: int, optional
+        Number of epochs for training the model.
+    return_flow_samples: bool, optional
+        Whether to return the flow samples.
+    verbose: bool, optional
+        Whether to print progress.
+
+    Returns
+    -------
+    ln_inv_evidence, err_ln_inv_evidence: float and tuple of floats
+        The log inverse evidence and its error.
+    flow_samples: 2-dimensional array, optional
+        Flow samples of shape `(nsamples, ndim)`. To check their agreement
+        with the input samples.
+    """
+    try:
+        import harmonic as hm
+    except ImportError:
+        raise ImportError("The `harmonic` package is required to calculate the evidence.") from None  # noqa
+
+    # Do some standard checks of inputs.
+    if samples.ndim != 3:
+        raise ValueError("The samples must be a 3-dimensional array of shape `(nchains, nsamples, ndim)`.")  # noqa
+
+    if log_posterior.ndim != 2 and log_posterior.shape[:2] != samples.shape[:2]:                             # noqa
+        raise ValueError("The log posterior must be a 2-dimensional array of shape `(nchains, nsamples)`.")  # noqa
+
+    ndim = samples.shape[-1]
+    chains = hm.Chains(ndim)
+    chains.add_chains_3d(samples, log_posterior)
+    chains_train, chains_infer = hm.utils.split_data(
+        chains, training_proportion=0.5)
+
+    # This has a few more hyperparameters that are set to defaults now.
+    model = hm.model.RQSplineModel(
+        ndim, standardize=True, temperature=temperature)
+    model.fit(chains_train.samples, epochs=epochs_num, verbose=verbose)
+
+    ev = hm.Evidence(chains_infer.nchains, model)
+    ev.add_chains(chains_infer)
+    ln_inv_evidence = ev.ln_evidence_inv
+    err_ln_inv_evidence = ev.compute_ln_inv_evidence_errors()
+
+    if return_flow_samples:
+        samples = samples.reshape((-1, ndim))
+        samp_num = samples.shape[0]
+        flow_samples = model.sample(samp_num)
+
+        return ln_inv_evidence, err_ln_inv_evidence, flow_samples
+
+    return ln_inv_evidence, err_ln_inv_evidence

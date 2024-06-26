@@ -14,166 +14,185 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """
 Script to run the PV validation model on various catalogues and simulations.
-The script is MPI parallelized over the IC realizations.
+The script is not MPI parallelised, instead it is best run on a GPU.
 """
-from argparse import ArgumentParser
-from datetime import datetime
-from os import makedirs, remove, rmdir
-from os.path import exists, join
-
-import csiborgtools
-import jax
-import numpy as np
-from h5py import File
-from mpi4py import MPI
-from numpyro.infer import MCMC, NUTS, init_to_sample
-from taskmaster import work_delegation  # noqa
+from argparse import ArgumentParser, ArgumentTypeError
 
 
-def get_model(args, nsim_iterator, get_model_kwargs):
-    """
-    Load the data and create the NumPyro model.
+def none_or_int(value):
+    if value.lower() == "none":
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        raise ArgumentTypeError(f"Invalid value: {value}. Must be an integer or 'none'.")  # noqa
 
-    Parameters
-    ----------
-    args : argparse.Namespace
-        Command line arguments.
-    nsim_iterator : int
-        Simulation index, not the IC index. Ranges from 0, ... .
-    get_model_kwargs : dict
-        Keyword arguments for reading in the data for the model
-        (`csiboorgtools.flow.get_model`).
 
-    Returns
-    -------
-    numpyro model
-    """
+def parse_args():
+    parser = ArgumentParser()
+    parser.add_argument("--simname", type=str, required=True,
+                        help="Simulation name.")
+    parser.add_argument("--catalogue", type=str, required=True,
+                        help="PV catalogue.")
+    parser.add_argument("--ksmooth", type=int, default=1,
+                        help="Smoothing index.")
+    parser.add_argument("--ksim", type=none_or_int, default=None,
+                        help="IC iteration number. If 'None', all IC realizations are used.")  # noqa
+    parser.add_argument("--ndevice", type=int, default=1,
+                        help="Number of devices to request.")
+    parser.add_argument("--device", type=str, default="cpu",
+                        help="Device to use.")
+    return parser.parse_args()
+
+
+ARGS = parse_args()
+# This must be done before we import JAX etc.
+from numpyro import set_host_device_count, set_platform                         # noqa
+set_platform(ARGS.device)                                                       # noqa
+set_host_device_count(ARGS.ndevice)                                             # noqa
+
+import sys                                                                      # noqa
+from os.path import join                                                        # noqa
+
+import jax                                                                      # noqa
+from h5py import File                                                           # noqa
+from mpi4py import MPI                                                          # noqa
+from numpyro.infer import MCMC, NUTS, init_to_median                            # noqa
+
+import csiborgtools                                                             # noqa
+
+
+def print_variables(names, variables):
+    for name, variable in zip(names, variables):
+        print(f"{name:<20} {variable}", flush=True)
+    print(flush=True)
+
+
+def get_model(paths, get_model_kwargs, verbose=True):
+    """Load the data and create the NumPyro model."""
+    paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     folder = "/mnt/extraspace/rstiskalek/catalogs/"
-    if args.catalogue == "A2":
+
+    nsims = paths.get_ics(ARGS.simname)
+    if ARGS.ksim is None:
+        nsim_iterator = [i for i in range(len(nsims))]
+    else:
+        nsim_iterator = [ARGS.ksim]
+        nsims = [nsims[ARGS.ksim]]
+
+    if verbose:
+        print(f"{'Simulation:':<20} {ARGS.simname}")
+        print(f"{'Catalogue:':<20} {ARGS.catalogue}")
+        print(f"{'Num. realisations:':<20} {len(nsims)}")
+        print(flush=True)
+
+    if ARGS.catalogue == "A2":
         fpath = join(folder, "A2.h5")
-    elif args.catalogue in ["LOSS", "Foundation", "Pantheon+", "SFI_gals",
+    elif ARGS.catalogue in ["LOSS", "Foundation", "Pantheon+", "SFI_gals",
                             "2MTF", "SFI_groups", "SFI_gals_masked",
                             "Pantheon+_groups", "Pantheon+_groups_zSN",
                             "Pantheon+_zSN"]:
         fpath = join(folder, "PV_compilation.hdf5")
-    elif "CB2_" in args.catalogue:
-        kind = args.catalogue.split("_")[-1]
-        fpath = join(folder, f"PV_mock_CB2_17417_{kind}.hdf5")
     else:
-        raise ValueError(f"Unknown catalogue: `{args.catalogue}`.")
+        raise ValueError(f"Unsupported catalogue: `{ARGS.catalogue}`.")
 
-    loader = csiborgtools.flow.DataLoader(args.simname, nsim_iterator,
-                                          args.catalogue, fpath, paths,
-                                          ksmooth=args.ksmooth)
+    loader = csiborgtools.flow.DataLoader(ARGS.simname, nsim_iterator,
+                                          ARGS.catalogue, fpath, paths,
+                                          ksmooth=ARGS.ksmooth)
 
     return csiborgtools.flow.get_model(loader, **get_model_kwargs)
 
 
-def run_model(model, nsteps, nburn, nchains, nsim, dump_folder,
-              model_kwargs, show_progress=True):
-    """
-    Run the NumPyro model and save the thinned samples to a temporary file.
+def get_harmonic_evidence(samples, log_posterior, nchains_harmonic, epoch_num):
+    """Compute evidence using the `harmonic` package."""
+    data, names = csiborgtools.dict_samples_to_array(samples)
+    data = data.reshape(nchains_harmonic, -1, len(names))
+    log_posterior = log_posterior.reshape(10, -1)
 
-    Parameters
-    ----------
-    model : jax.numpyro.Primitive
-        Model to be run.
-    nsteps : int
-        Number of steps.
-    nburn : int
-        Number of burn-in steps.
-    nchains : int
-        Number of chains.
-    nsim : int
-        Simulation index.
-    dump_folder : str
-        Folder where the temporary files are stored.
-    show_progress : bool
-        Whether to show the progress bar.
+    return csiborgtools.harmonic_evidence(
+        data, log_posterior, return_flow_samples=False, epochs_num=epoch_num)
 
-    Returns
-    -------
-    None
-    """
-    nuts_kernel = NUTS(model, init_strategy=init_to_sample)
-    mcmc = MCMC(nuts_kernel, num_warmup=nburn, num_samples=nsteps,
-                chain_method="sequential", num_chains=nchains,
-                progress_bar=show_progress)
-    rng_key = jax.random.PRNGKey(42)
-    mcmc.run(rng_key, **model_kwargs)
 
-    if show_progress:
-        print(f"Summary of the MCMC run of simulation indexed {nsim}:")
-        mcmc.print_summary()
-
-    samples = mcmc.get_samples()
-    thinned_samples = csiborgtools.thin_samples_by_acl(samples)
-
-    # Calculate the chi2
-    keys = list(thinned_samples.keys())
-    nsamples = len(thinned_samples[keys[0]])
+def run_model(model, nsteps, nburn,  model_kwargs, out_folder, sample_beta,
+              calculate_evidence, nchains_harmonic, epoch_num, kwargs_print):
+    """Run the NumPyro model and save output to a file."""
     try:
-        zobs_mean, zobs_std = model.predict_zobs(thinned_samples)
-        nu = model.ndata - len(keys)
-        chi2 = [np.sum((zobs_mean[:, i] - model._z_obs)**2 / zobs_std[:, i]**2) / nu  # noqa
-                for i in range(nsamples)]
-    except NotImplementedError:
-        chi2 = [0. for _ in range(nsamples)]
+        ndata = model.ndata
+    except AttributeError as e:
+        raise AttributeError("The model must have an attribute `ndata` "
+                             "indicating the number of data points.") from e
 
-    gof = csiborgtools.numpyro_gof(model, mcmc, model_kwargs)
+    nuts_kernel = NUTS(model, init_strategy=init_to_median(num_samples=1000))
+    mcmc = MCMC(nuts_kernel, num_warmup=nburn, num_samples=nsteps)
+    rng_key = jax.random.PRNGKey(42)
 
-    # Save the samples to the temporary folder.
-    fname = join(dump_folder, f"samples_{nsim}.npz")
-    np.savez(fname, **thinned_samples, **gof, chi2=chi2)
+    mcmc.run(rng_key, extra_fields=("potential_energy",), **model_kwargs)
+    samples = mcmc.get_samples()
 
+    log_posterior = -mcmc.get_extra_fields()["potential_energy"]
+    log_likelihood = samples.pop("ll_values")
+    if log_likelihood is None:
+        raise ValueError("The samples must contain the log likelihood values under the key `ll_values`.")  # noqa
 
-def combine_from_simulations(catalogue_name, simname, nsims, outfolder,
-                             dumpfolder, ksmooth):
-    """
-    Combine the results from individual simulations into a single file.
+    BIC, AIC = csiborgtools.BIC_AIC(samples, log_likelihood, ndata)
+    print(f"{'BIC':<20} {BIC}")
+    print(f"{'AIC':<20} {AIC}")
+    mcmc.print_summary()
 
-    Parameters
-    ----------
-    catalogue_name : str
-        Catalogue name.
-    simname : str
-        Simulation name.
-    nsims : list
-        List of IC realisations.
-    outfolder : str
-        Output folder.
-    dumpfolder : str
-        Dumping folder where the temporary files are stored.
-    ksmooth : int
-        Smoothing index.
+    if calculate_evidence:
+        print("Calculating the evidence using `harmonic`.", flush=True)
+        ln_evidence, ln_evidence_err = get_harmonic_evidence(
+            samples, log_posterior, nchains_harmonic, epoch_num)
+        print(f"{'ln(Z)':<20} {ln_evidence}")
+        print(f"{'ln(Z) error':<20} {ln_evidence_err}")
+    else:
+        ln_evidence = jax.numpy.nan
+        ln_evidence_err = (jax.numpy.nan, jax.numpy.nan)
 
-    Returns
-    -------
-    None
-    """
-    fname_out = join(
-        outfolder,
-        f"flow_samples_{catalogue_name}_{simname}_smooth_{ksmooth}.hdf5")
-    print(f"Combining results from invidivual simulations to `{fname_out}`.")
+    fname = f"samples_{ARGS.simname}_{ARGS.catalogue}_ksmooth{ARGS.ksmooth}.hdf5"  # noqa
+    if ARGS.ksim is not None:
+        fname = fname.replace(".hdf5", f"_nsim{ARGS.ksim}.hdf5")
 
-    if exists(fname_out):
-        remove(fname_out)
+    if sample_beta:
+        fname = fname.replace(".hdf5", "_sample_beta.hdf5")
 
-    for nsim in nsims:
-        fname = join(dumpfolder, f"samples_{nsim}.npz")
-        data = np.load(fname)
+    fname = join(out_folder, fname)
+    print(f"Saving results to `{fname}`.")
+    with File(fname, "w") as f:
+        # Write samples
+        grp = f.create_group("samples")
+        for key, value in samples.items():
+            grp.create_dataset(key, data=value)
 
-        with File(fname_out, 'a') as f:
-            grp = f.create_group(f"sim_{nsim}")
-            for key in data.files:
-                grp.create_dataset(key, data=data[key])
+        # Write log likelihood and posterior
+        f.create_dataset("log_likelihood", data=log_likelihood)
+        f.create_dataset("log_posterior", data=log_posterior)
 
-        # Remove the temporary file.
-        remove(fname)
+        # Write goodness of fit
+        grp = f.create_group("gof")
+        grp.create_dataset("BIC", data=BIC)
+        grp.create_dataset("AIC", data=AIC)
+        grp.create_dataset("lnZ", data=ln_evidence)
+        grp.create_dataset("lnZ_err", data=ln_evidence_err)
 
-    # Remove the dumping folder.
-    rmdir(dumpfolder)
-    print("Finished combining results.")
+    fname_summary = fname.replace(".hdf5", ".txt")
+    print(f"Saving summary to `{fname_summary}`.")
+    with open(fname_summary, 'w') as f:
+        original_stdout = sys.stdout
+        sys.stdout = f
+
+        print("User parameters:")
+        for kwargs in kwargs_print:
+            print_variables(kwargs.keys(), kwargs.values())
+
+        print("HMC summary:")
+        print(f"{'BIC':<20} {BIC}")
+        print(f"{'AIC':<20} {AIC}")
+        print(f"{'ln(Z)':<20} {ln_evidence}")
+        print(f"{'ln(Z) error':<20} {ln_evidence_err}")
+        mcmc.print_summary(exclude_deterministic=False)
+        sys.stdout = original_stdout
+
 
 ###############################################################################
 #                        Command line interface                               #
@@ -181,52 +200,68 @@ def combine_from_simulations(catalogue_name, simname, nsims, outfolder,
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("--simname", type=str, required=True,
-                        help="Simulation name.")
-    parser.add_argument("--catalogue", type=str, required=True,
-                        help="PV catalogue.")
-    parser.add_argument("--ksmooth", type=int, required=True,
-                        help="Smoothing index.")
-    parser.add_argument("--nchains", type=int, default=4,
-                        help="Number of chains.")
-    parser.add_argument("--nsteps", type=int, default=2500,
-                        help="Number of post burn-n steps.")
-    parser.add_argument("--nburn", type=int, default=500,
-                        help="Number of burn-in steps.")
-    args = parser.parse_args()
-
-    comm = MPI.COMM_WORLD
-    rank, size = comm.Get_rank(), comm.Get_size()
-    out_folder = "/mnt/extraspace/rstiskalek/csiborg_postprocessing/peculiar_velocity"  # noqa
-
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
-    nsims = paths.get_ics(args.simname)
+    out_folder = "/mnt/extraspace/rstiskalek/csiborg_postprocessing/peculiar_velocity"  # noqa
+    print(f"{'Num. devices:':<20} {jax.device_count()}")
+    print(f"{'Devices:':<20} {jax.devices()}")
 
-    get_model_kwargs = {"zcmb_max": 0.06}
-    model_kwargs = {"sample_alpha": True, "sample_beta": True}
-    if "CB2_" in args.catalogue:
-        model_kwargs["sample_h"] = False
+    ###########################################################################
+    #                        Fixed user parameters                            #
+    ###########################################################################
 
-    # Create the dumping folder.
-    if comm.Get_rank() == 0:
-        dump_folder = join(out_folder,
-                           f"temp_{str(datetime.now())}".replace(" ", "_"))
-        print(f"Creating folder `{dump_folder}`.")
-        makedirs(dump_folder)
+    nsteps = 5000
+    nburn = 500
+    zcmb_max = 0.06
+    sample_alpha = True
+    sample_beta = True
+    calculate_evidence = False
+    nchains_harmonic = 10
+    num_epochs = 30
+
+    if nsteps % nchains_harmonic != 0:
+        raise ValueError("The number of steps must be divisible by the number of chains.")  # noqa
+
+    main_params = {"nsteps": nsteps, "nburn": nburn, "zcmb_max": zcmb_max,
+                   "sample_alpha": sample_alpha, "sample_beta": sample_beta,
+                   "calculate_evidence": calculate_evidence,
+                   "nchains_harmonic": nchains_harmonic,
+                   "num_epochs": num_epochs}
+    print_variables(main_params.keys(), main_params.values())
+
+    calibration_hyperparams = {"Vext_std": 250,
+                               "alpha_mean": 1.0, "alpha_std": 0.5,
+                               "beta_mean": 1.0, "beta_std": 0.5,
+                               "sigma_v_mean": 200., "sigma_v_std": 100.,
+                               "sample_alpha": sample_alpha,
+                               "sample_beta": sample_beta,
+                               }
+    print_variables(
+        calibration_hyperparams.keys(), calibration_hyperparams.values())
+
+    if ARGS.catalogue in ["LOSS", "Foundation", "Pantheon+", "Pantheon+_groups"]:  # noqa
+        distmod_hyperparams = {"e_mu_mean": 0.1, "e_mu_std": 0.05,
+                               "mag_cal_mean": -18.25, "mag_cal_std": 0.5,
+                               "alpha_cal_mean": 0.148, "alpha_cal_std": 0.05,
+                               "beta_cal_mean": 3.112, "beta_cal_std": 1.0,
+                               }
+    elif ARGS.catalogue in ["SFI_gals", "2MTF"]:
+        distmod_hyperparams = {"e_mu_mean": 0.3, "e_mu_std": 0.15,
+                               "a_mean": -21., "a_std": 0.5,
+                               "b_mean": -5.95, "b_std": 0.25,
+                               }
     else:
-        dump_folder = None
-    dump_folder = comm.bcast(dump_folder, root=0)
+        raise ValueError(f"Unsupported catalogue: `{ARGS.catalogue}`.")
 
-    def main(i):
-        model = get_model(args, i, get_model_kwargs)
-        run_model(model, args.nsteps, args.nburn, args.nchains, nsims[i],
-                  dump_folder, model_kwargs, show_progress=size == 1)
+    print_variables(
+        distmod_hyperparams.keys(), distmod_hyperparams.values())
 
-    work_delegation(main, [i for i in range(len(nsims))], comm,
-                    master_verbose=True)
-    comm.Barrier()
+    kwargs_print = (main_params, calibration_hyperparams, distmod_hyperparams)
+    ###########################################################################
 
-    if rank == 0:
-        combine_from_simulations(args.catalogue, args.simname, nsims,
-                                 out_folder, dump_folder, args.ksmooth)
+    model_kwargs = {"calibration_hyperparams": calibration_hyperparams,
+                    "distmod_hyperparams": distmod_hyperparams}
+    get_model_kwargs = {"zcmb_max": zcmb_max}
+
+    model = get_model(paths, get_model_kwargs, )
+    run_model(model, nsteps, nburn, model_kwargs, out_folder, sample_beta,
+              calculate_evidence, nchains_harmonic, num_epochs, kwargs_print)
