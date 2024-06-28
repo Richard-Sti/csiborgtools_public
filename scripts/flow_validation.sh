@@ -34,6 +34,7 @@ Finished running:
 
 Remaining to do:
     - Lilow, CF4, and csiborgs with beta fixed.
+    - Run some CB boxes individually for a chosen dataset.
 COMMENT
 
 # Submit a job for each combination of simname, catalogue, ksim
