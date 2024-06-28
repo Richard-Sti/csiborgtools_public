@@ -32,6 +32,8 @@ Finished running:
 
     - csiborg2X wbeta with all catalogues
 
+
+    - csiborg2_main/csiborg2X 2MTF & Pantheon+ boxes individually.
 Remaining to do:
     - Lilow, CF4, and csiborgs with beta fixed.
     - Run some CB boxes individually for a chosen dataset.
@@ -39,16 +41,18 @@ COMMENT
 
 # Submit a job for each combination of simname, catalogue, ksim
 # for simname in "Carrick2015" "Lilow2024" "CF4" "CF4gp"; do
-for simname in "csiborg1" "csiborg2_main" "csiborg2X"; do
-    for catalogue in "LOSS" "Foundation" "2MTF" "Pantheon+" "Pantheon+_groups" "Pantheon+_zSN" "SFI_gals"; do
+# for simname in "csiborg1" "csiborg2_main" "csiborg2X"; do
+for simname in "csiborg2_main" "csiborg2X"; do
+    # for catalogue in "LOSS" "Foundation" "2MTF" "Pantheon+" "Pantheon+_groups" "Pantheon+_zSN" "SFI_gals"; do
+    for catalogue in "2MTF" "Pantheon+"; do
         # for ksim in 0 1 2; do
-        # for ksim in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 "none"; do
-        for ksim in "none"; do
+        for ksim in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        # for ksim in "none"; do
             pythoncm="$env $file --catalogue $catalogue --simname $simname --ksim $ksim --ksmooth $ksmooth --ndevice $ndevice --device $device"
 
             if [ $on_login -eq 1 ]; then
                 echo $pythoncm
-                # $pythoncm
+                $pythoncm
             else
                 cm="addqueue -q $queue -s -m $memory --gpus 1 --gputype $gputype $pythoncm"
                 echo "Submitting:"
@@ -56,7 +60,7 @@ for simname in "csiborg1" "csiborg2_main" "csiborg2X"; do
                 eval $cm
             fi
             echo
-            sleep 0.05
+            sleep 0.001
         done
     done
 done
