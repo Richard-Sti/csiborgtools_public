@@ -103,12 +103,11 @@ class DataLoader:
         nobject = self._los_density.shape[1]
         dtype = self._los_density.dtype
 
-        # In case of Carrick 2015 the box is in galactic coordinates..
-        if simname == "Carrick2015":
-            # Carrick+2015 box is in galactic coordinates
+        if simname in ["Carrick2015", "Lilow2024"]:
+            # Carrick+2015 and Lilow+2024 are in galactic coordinates
             d1, d2 = radec_to_galactic(self._cat["RA"], self._cat["DEC"])
         elif "CF4" in simname:
-            # CF4 box is in supergalactic coordinates
+            # CF4 is in supergalactic coordinates
             d1, d2 = radec_to_supergalactic(self._cat["RA"], self._cat["DEC"])
         else:
             d1, d2 = self._cat["RA"], self._cat["DEC"]
@@ -141,6 +140,12 @@ class DataLoader:
         # this.
         if simname in ["CF4", "CF4gp"]:
             self._los_density = np.clip(self._los_density, 1e-5, None,)
+
+        # Lilow+2024 outside of the range data is NaN. Replace it with some
+        # finite values. This is OK because the PV tracers are not so far.
+        if simname == "Lilow2024":
+            self._los_density[np.isnan(self._los_density)] = 1.
+            self._los_radial_velocity[np.isnan(self._los_radial_velocity)] = 0.
 
         self._mask = np.ones(len(self._cat), dtype=bool)
         self._catname = catalogue
