@@ -11,7 +11,6 @@ MAS="SPH"
 grid=1024
 
 
-
 for catalogue in "LOSS" "Foundation" "Pantheon+" "2MTF" "SFI_gals"; do
     pythoncm="$env $file --catalogue $catalogue --nsims $nsims --simname $simname --MAS $MAS --grid $grid"
     if [ $on_login -eq 1 ]; then
