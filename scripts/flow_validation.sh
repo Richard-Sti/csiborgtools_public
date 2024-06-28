@@ -16,17 +16,38 @@ if [ "$on_login" != "1" ] && [ "$on_login" != "0" ]; then
   exit 1
 fi
 
+
+: << 'COMMENT'
+Finished running:
+    - Carrick2015 with all catalogues
+    - Lilow2024 wbeta with all catalogues
+
+    - CF4 wbeta with all catalogues
+
+    - CF4gp wbeta with all catalogues
+
+    - csiborg1 wbeta with all catalogues
+
+    - csiborg2_main wbeta with all catalogues
+
+    - csiborg2X wbeta with all catalogues
+
+Remaining to do:
+    - Lilow, CF4, and csiborgs with beta fixed.
+COMMENT
+
 # Submit a job for each combination of simname, catalogue, ksim
-for simname in "Lilow2024"; do
-    for catalogue in "LOSS"; do
+# for simname in "Carrick2015" "Lilow2024" "CF4" "CF4gp"; do
+for simname in "csiborg1" "csiborg2_main" "csiborg2X"; do
+    for catalogue in "LOSS" "Foundation" "2MTF" "Pantheon+" "Pantheon+_groups" "Pantheon+_zSN" "SFI_gals"; do
         # for ksim in 0 1 2; do
         # for ksim in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 "none"; do
-        for ksim in 0; do
+        for ksim in "none"; do
             pythoncm="$env $file --catalogue $catalogue --simname $simname --ksim $ksim --ksmooth $ksmooth --ndevice $ndevice --device $device"
 
             if [ $on_login -eq 1 ]; then
                 echo $pythoncm
-                $pythoncm
+                # $pythoncm
             else
                 cm="addqueue -q $queue -s -m $memory --gpus 1 --gputype $gputype $pythoncm"
                 echo "Submitting:"
