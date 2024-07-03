@@ -297,7 +297,8 @@ def interpolate_field(pos, simname, nsim, MAS, grid, dump_folder, rmax,
     density = get_field(simname, nsim, "density", MAS, grid)
     rdist, finterp = csiborgtools.field.evaluate_los(
         density, sky_pos=pos, boxsize=boxsize, rmax=rmax, dr=dr,
-        smooth_scales=smooth_scales, verbose=verbose)
+        smooth_scales=smooth_scales, verbose=verbose,
+        interpolation_method="linear")
 
     print(f"Writing temporary file `{fname_out}`.")
     with File(fname_out, 'w') as f:
@@ -314,7 +315,8 @@ def interpolate_field(pos, simname, nsim, MAS, grid, dump_folder, rmax,
     rdist, finterp = csiborgtools.field.evaluate_los(
         velocity[0], velocity[1], velocity[2],
         sky_pos=pos, boxsize=boxsize, rmax=rmax, dr=dr,
-        smooth_scales=smooth_scales, verbose=verbose)
+        smooth_scales=smooth_scales, verbose=verbose,
+        interpolation_method="linear")
 
     with File(fname_out, 'a') as f:
         f.create_dataset("velocity", data=finterp)
