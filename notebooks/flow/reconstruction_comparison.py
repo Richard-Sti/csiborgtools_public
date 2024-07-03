@@ -162,41 +162,78 @@ def get_samples(simname, catalogue, ksmooth=0, nsim=None, sample_beta=True,
 
 
 ###############################################################################
+#                         Bulk flow plotting                                  #
+###############################################################################
 
 
-def get_bulkflow(simname, catalogue, ksmooth=0, nsim=None, sample_beta=True,
-                 convert_to_galactic=True, simulation_only=False):
-    # Read in the samples
-    fname_samples = get_fname(simname, catalogue, ksmooth, nsim, sample_beta)
-    with File(fname_samples, 'r') as f:
-        simulation_weights = jnp.exp(f["simulation_weights"][...])
-        Vext = f["samples/Vext"][...]
-
-        try:
-            beta = f["samples/beta"][...]
-        except KeyError:
-            beta = jnp.ones_like(simulation_weights)
-
-    # Read in the bulk flow
+def get_bulkflow_simulation(simname, convert_to_galactic=True):
     f = np.load(f"/mnt/extraspace/rstiskalek/csiborg_postprocessing/field_shells/enclosed_mass_{simname}.npz")  # noqa
-    r, Bsim = f["distances"], f["cumulative_velocity"]
-
-    # Mask out the unconstrained large scales
-    Rmax = 150  # Mpc/h
-    mask = r < Rmax
-    r = r[mask]
-    Bsim = Bsim[:, mask, :]
-
-    # Add the external flow to the bulk flow and weight it
-    B = Bsim[:, :, None, :] * beta[None, None, :, None]  # noqa
-    if not simulation_only:
-        B += Vext[None, None, :, :]
-    B = jnp.sum(B * simulation_weights.T[:, None, :, None], axis=0)
+    r, B = f["distances"], f["cumulative_velocity"]
 
     if convert_to_galactic:
         Bmag, Bl, Bb = cartesian_to_radec(B[..., 0], B[..., 1], B[..., 2])
         Bl, Bb = csiborgtools.radec_to_galactic(Bl, Bb)
-        return r, np.stack([Bmag, Bl, Bb], axis=-1)
+        B = np.stack([Bmag, Bl, Bb], axis=-1)
+
+    return r, B
+
+
+def get_bulkflow(simname, catalogue, ksmooth=0, nsim=None, sample_beta=True,
+                 convert_to_galactic=True, weight_simulations=True,
+                 downsample=10):
+    # Read in the bulk flow
+    f = np.load(f"/mnt/extraspace/rstiskalek/csiborg_postprocessing/field_shells/enclosed_mass_{simname}.npz")  # noqa
+    r = f["distances"]
+    # Shape of B_i is (nsims, nradial)
+    Bx, By, Bz = (f["cumulative_velocity"][..., i] for i in range(3))
+
+    # Mask out the unconstrained large scales
+    Rmax = 125  # Mpc/h
+    mask = r < Rmax
+    r = r[mask]
+    Bx = Bx[:, mask]
+    By = By[:, mask]
+    Bz = Bz[:, mask]
+
+    # Read in the samples
+    fname_samples = get_fname(simname, catalogue, ksmooth, nsim, sample_beta)
+    with File(fname_samples, 'r') as f:
+        # Shape of Vext_i is (nsamples,)
+        Vext_x, Vext_y, Vext_z = (f["samples/Vext"][...][::downsample, i] for i in range(3))  # noqa
+        nsamples = len(Vext_x)
+
+        if weight_simulations:
+            simulation_weights = jnp.exp(f["simulation_weights"][...])[::downsample]  # noqa
+        else:
+            nsims = len(Bx)
+            simulation_weights = jnp.ones((nsamples, nsims)) / nsims
+
+        if sample_beta:
+            beta = f["samples/beta"][...][::downsample]
+        else:
+            beta = jnp.ones(nsamples)
+
+    # Multiply the simulation velocities by beta
+    Bx = Bx[..., None] * beta
+    By = By[..., None] * beta
+    Bz = Bz[..., None] * beta
+
+    # Shape of B_i is (nsims, nradial, nsamples)
+    Bx = Bx + Vext_x
+    By = By + Vext_y
+    Bz = Bz + Vext_z
+
+    simulation_weights = simulation_weights.T[:, None, :]
+    Bx = jnp.sum(Bx * simulation_weights, axis=0)
+    By = jnp.sum(By * simulation_weights, axis=0)
+    Bz = jnp.sum(Bz * simulation_weights, axis=0)
+
+    if convert_to_galactic:
+        Bmag, Bl, Bb = cartesian_to_radec(Bx, By, Bz)
+        Bl, Bb = csiborgtools.radec_to_galactic(Bl, Bb)
+        B = np.stack([Bmag, Bl, Bb], axis=-1)
+    else:
+        B = np.stack([Bx, By, Bz], axis=-1)
 
     return r, B
 
