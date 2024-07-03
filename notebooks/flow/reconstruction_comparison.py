@@ -180,7 +180,7 @@ def get_bulkflow_simulation(simname, convert_to_galactic=True):
 
 def get_bulkflow(simname, catalogue, ksmooth=0, nsim=None, sample_beta=True,
                  convert_to_galactic=True, weight_simulations=True,
-                 downsample=10):
+                 downsample=1, Rmax=125):
     # Read in the bulk flow
     f = np.load(f"/mnt/extraspace/rstiskalek/csiborg_postprocessing/field_shells/enclosed_mass_{simname}.npz")  # noqa
     r = f["distances"]
@@ -188,7 +188,7 @@ def get_bulkflow(simname, catalogue, ksmooth=0, nsim=None, sample_beta=True,
     Bx, By, Bz = (f["cumulative_velocity"][..., i] for i in range(3))
 
     # Mask out the unconstrained large scales
-    Rmax = 125  # Mpc/h
+    Rmax = Rmax  # Mpc/h
     mask = r < Rmax
     r = r[mask]
     Bx = Bx[:, mask]
