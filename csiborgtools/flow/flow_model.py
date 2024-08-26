@@ -35,6 +35,7 @@ from numpyro.distributions import Normal, Uniform, MultivariateNormal
 from quadax import simpson
 from tqdm import trange
 
+from .selection import toy_log_magnitude_selection
 from ..params import SPEED_OF_LIGHT, simname2Omega_m
 from ..utils import fprint, radec_to_galactic, radec_to_supergalactic
 
@@ -78,7 +79,7 @@ class DataLoader:
         self._catname = catalogue
 
         fprint("reading the interpolated field.", verbose)
-        self._field_rdist, self._los_density, self._los_velocity, self._rmax = self._read_field(  # noqa
+        self._field_rdist, self._los_density, self._los_velocity = self._read_field(  # noqa
             simname, ksim, catalogue, ksmooth, paths)
 
         if len(self._cat) != self._los_density.shape[1]:
@@ -170,14 +171,6 @@ class DataLoader:
         return self._los_velocity[:, :, self._mask, ...]
 
     @property
-    def rmax(self):
-        """
-        Radial distance above which the underlying reconstruction is
-        extrapolated `(n_sims, n_objects)`.
-        """
-        return self._rmax[:, self._mask]
-
-    @property
     def los_radial_velocity(self):
         """
         Radial velocity along the line of sight `(n_sims, n_objects, n_steps)`.
@@ -201,7 +194,6 @@ class DataLoader:
 
         los_density = [None] * len(ksims)
         los_velocity = [None] * len(ksims)
-        rmax = [None] * len(ksims)
 
         for n, ksim in enumerate(ksims):
             nsim = nsims[ksim]
@@ -216,13 +208,11 @@ class DataLoader:
                 los_density[n] = f[f"density_{nsim}"][indx]
                 los_velocity[n] = f[f"velocity_{nsim}"][indx]
                 rdist = f[f"rdist_{nsim}"][...]
-                rmax[n] = f[f"rmax_{nsim}"][indx]
 
         los_density = np.stack(los_density)
         los_velocity = np.stack(los_velocity)
-        rmax = np.stack(rmax)
 
-        return rdist, los_density, los_velocity, rmax
+        return rdist, los_density, los_velocity
 
     def _read_catalogue(self, catalogue, catalogue_fpath):
         if catalogue == "A2":
@@ -622,9 +612,6 @@ class PV_LogLikelihood(BaseFlowValidationModel):
         LOS density field.
     los_velocity : 3-dimensional array of shape (n_sims, n_objects, n_steps)
         LOS radial velocity field.
-    rmax : 1-dimensional array of shape (n_sims, n_objects)
-        Radial distance above which the underlying reconstruction is
-        extrapolated.
     RA, dec : 1-dimensional arrays of shape (n_objects)
         Right ascension and declination in degrees.
     z_obs : 1-dimensional array of shape (n_objects)
@@ -643,11 +630,13 @@ class PV_LogLikelihood(BaseFlowValidationModel):
         Catalogue kind, either "TFR", "SN", or "simple".
     name : str
         Name of the catalogue.
+    toy_selection : tuple of length 3, optional
+        Toy magnitude selection paramers `m1`, `m2` and `a`. Optional.
     """
 
-    def __init__(self, los_density, los_velocity, rmax, RA, dec, z_obs,
-                 e_zobs, calibration_params, maxmag_selection, r_xrange,
-                 Omega_m, kind, name):
+    def __init__(self, los_density, los_velocity, RA, dec, z_obs, e_zobs,
+                 calibration_params, maxmag_selection, r_xrange, Omega_m,
+                 kind, name, toy_selection=None):
         if e_zobs is not None:
             e2_cz_obs = jnp.asarray((SPEED_OF_LIGHT * e_zobs)**2)
         else:
@@ -657,9 +646,9 @@ class PV_LogLikelihood(BaseFlowValidationModel):
         RA = np.deg2rad(RA)
         dec = np.deg2rad(dec)
 
-        names = ["los_density", "los_velocity", "rmax", "RA", "dec", "z_obs",
+        names = ["los_density", "los_velocity", "RA", "dec", "z_obs",
                  "e2_cz_obs"]
-        values = [los_density, los_velocity, rmax, RA, dec, z_obs, e2_cz_obs]
+        values = [los_density, los_velocity, RA, dec, z_obs, e2_cz_obs]
         self._setattr_as_jax(names, values)
         self._set_calibration_params(calibration_params)
         self._set_radial_spacing(r_xrange, Omega_m)
@@ -669,6 +658,7 @@ class PV_LogLikelihood(BaseFlowValidationModel):
         self.Omega_m = Omega_m
         self.norm = - self.ndata * jnp.log(self.num_sims)
         self.maxmag_selection = maxmag_selection
+        self.toy_selection = toy_selection
 
         if kind == "TFR":
             self.mag_min, self.mag_max = jnp.min(self.mag), jnp.max(self.mag)
@@ -687,6 +677,17 @@ class PV_LogLikelihood(BaseFlowValidationModel):
 
         if maxmag_selection is not None and self.maxmag_selection > self.mag_max:                     # noqa
             raise ValueError("The maximum magnitude cannot be larger than the selection threshold.")  # noqa
+
+        if toy_selection is not None and self.maxmag_selection is not None:
+            raise ValueError("`toy_selection` and `maxmag_selection` cannot be used together.")       # noqa
+
+        if toy_selection is not None:
+            self.m1, self.m2, self.a = toy_selection
+            self.log_Fm = toy_log_magnitude_selection(
+                self.mag, self.m1, self.m2, self.a)
+
+        if toy_selection is not None and self.kind != "TFR":
+            raise ValueError("Toy selection is only implemented for TFRs.")
 
     def __call__(self, field_calibration_params, distmod_params,
                  inference_method):
@@ -772,12 +773,30 @@ class PV_LogLikelihood(BaseFlowValidationModel):
 
                 mag_true, eta_true = x_true[..., 0], x_true[..., 1]
                 # Log-likelihood of the observed magnitudes.
-                if self.maxmag_selection is None:
-                    ll0 += jnp.sum(normal_logpdf(
-                        self.mag, mag_true, self.e_mag))
-                else:
+                if self.maxmag_selection is not None:
                     ll0 += jnp.sum(upper_truncated_normal_logpdf(
                         self.mag, mag_true, self.e_mag, self.maxmag_selection))
+                elif self.toy_selection is not None:
+                    ll_mag = self.log_Fm
+                    ll_mag += normal_logpdf(self.mag, mag_true, self.e_mag)
+
+                    # Normalization per datapoint, initially (ndata, nxrange)
+                    mu_start = mag_true - 5 * self.e_mag
+                    mu_end = mag_true + 5 * self.e_mag
+                    # 100 is a reasonable and sufficient choice.
+                    mu_xrange = jnp.linspace(mu_start, mu_end, 100).T
+
+                    norm = toy_log_magnitude_selection(
+                        mu_xrange, self.m1, self.m2, self.a)
+                    norm = norm + normal_logpdf(
+                        mu_xrange, mag_true[:, None], self.e_mag[:, None])
+                    # Now integrate over the magnitude range.
+                    norm = simpson(jnp.exp(norm), x=mu_xrange, axis=-1)
+
+                    ll0 += jnp.sum(ll_mag - jnp.log(norm))
+                else:
+                    ll0 += jnp.sum(normal_logpdf(
+                        self.mag, mag_true, self.e_mag))
 
                 # Log-likelihood of the observed linewidths.
                 ll0 += jnp.sum(normal_logpdf(eta_true, self.eta, self.e_eta))
@@ -876,7 +895,8 @@ def PV_validation_model(models, distmod_hyperparams_per_model,
 ###############################################################################
 
 
-def get_model(loader, zcmb_min=0.0, zcmb_max=None, maxmag_selection=None):
+def get_model(loader, zcmb_min=0.0, zcmb_max=None, maxmag_selection=None,
+              toy_selection=None):
     """
     Get a model and extract the relevant data from the loader.
 
@@ -890,6 +910,9 @@ def get_model(loader, zcmb_min=0.0, zcmb_max=None, maxmag_selection=None):
         Maximum observed redshift in the CMB frame to include.
     maxmag_selection : float, optional
         Maximum magnitude selection threshold.
+    toy_selection : tuple of length 3, optional
+        Toy magnitude selection paramers `m1`, `m2` and `a` for TFRs of the
+        Boubel+24 model.
 
     Returns
     -------
@@ -899,7 +922,6 @@ def get_model(loader, zcmb_min=0.0, zcmb_max=None, maxmag_selection=None):
 
     los_overdensity = loader.los_density
     los_velocity = loader.los_radial_velocity
-    rmax = loader.rmax
     kind = loader._catname
 
     if maxmag_selection is not None and kind != "2MTF":
@@ -917,7 +939,7 @@ def get_model(loader, zcmb_min=0.0, zcmb_max=None, maxmag_selection=None):
                               "e_c": e_c[mask]}
 
         model = PV_LogLikelihood(
-            los_overdensity[:, mask], los_velocity[:, mask], rmax[:, mask],
+            los_overdensity[:, mask], los_velocity[:, mask],
             RA[mask], dec[mask], zCMB[mask], e_zCMB, calibration_params,
             maxmag_selection, loader.rdist, loader._Omega_m, "SN", name=kind)
     elif "Pantheon+" in kind:
@@ -945,20 +967,27 @@ def get_model(loader, zcmb_min=0.0, zcmb_max=None, maxmag_selection=None):
                               "e_mag": e_mB[mask], "e_x1": e_x1[mask],
                               "e_c": e_c[mask]}
         model = PV_LogLikelihood(
-            los_overdensity[:, mask], los_velocity[:, mask], rmax[:, mask],
+            los_overdensity[:, mask], los_velocity[:, mask],
             RA[mask], dec[mask], zCMB[mask], e_zCMB[mask], calibration_params,
             maxmag_selection, loader.rdist, loader._Omega_m, "SN", name=kind)
     elif kind in ["SFI_gals", "2MTF", "SFI_gals_masked"]:
         keys = ["RA", "DEC", "z_CMB", "mag", "eta", "e_mag", "e_eta"]
         RA, dec, zCMB, mag, eta, e_mag, e_eta = (loader.cat[k] for k in keys)
 
+        if kind == "SFI_gals" and toy_selection is not None:
+            if len(toy_selection) != 3:
+                raise ValueError("Toy selection must be a tuple with 3 elements.")  # noqa
+            m1, m2, a = toy_selection
+            fprint(f"using toy selection with m1 = {m1}, m2 = {m2}, a = {a}.")
+
         mask = (zCMB < zcmb_max) & (zCMB > zcmb_min)
         calibration_params = {"mag": mag[mask], "eta": eta[mask],
                               "e_mag": e_mag[mask], "e_eta": e_eta[mask]}
         model = PV_LogLikelihood(
-            los_overdensity[:, mask], los_velocity[:, mask], rmax[:, mask],
+            los_overdensity[:, mask], los_velocity[:, mask],
             RA[mask], dec[mask], zCMB[mask], None, calibration_params,
-            maxmag_selection, loader.rdist, loader._Omega_m, "TFR", name=kind)
+            maxmag_selection, loader.rdist, loader._Omega_m, "TFR", name=kind,
+            toy_selection=toy_selection)
     elif "CF4_TFR_" in kind:
         # The full name can be e.g. "CF4_TFR_not2MTForSFI_i" or "CF4_TFR_i".
         band = kind.split("_")[-1]
@@ -995,7 +1024,7 @@ def get_model(loader, zcmb_min=0.0, zcmb_max=None, maxmag_selection=None):
         calibration_params = {"mag": mag[mask], "eta": eta[mask],
                               "e_mag": e_mag[mask], "e_eta": e_eta[mask]}
         model = PV_LogLikelihood(
-            los_overdensity[:, mask], los_velocity[:, mask], rmax[:, mask],
+            los_overdensity[:, mask], los_velocity[:, mask],
             RA[mask], dec[mask], z_obs[mask], None, calibration_params,
             maxmag_selection, loader.rdist, loader._Omega_m, "TFR", name=kind)
     elif kind in ["CF4_GroupAll"]:
@@ -1011,7 +1040,7 @@ def get_model(loader, zcmb_min=0.0, zcmb_max=None, maxmag_selection=None):
 
         calibration_params = {"mu": mu[mask], "e_mu": e_mu[mask]}
         model = PV_LogLikelihood(
-            los_overdensity[:, mask], los_velocity[:, mask], rmax[:, mask],
+            los_overdensity[:, mask], los_velocity[:, mask],
             RA[mask], dec[mask], zCMB[mask], None, calibration_params,
             maxmag_selection,  loader.rdist, loader._Omega_m, "simple",
             name=kind)

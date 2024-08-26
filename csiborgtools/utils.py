@@ -492,6 +492,11 @@ def dict_samples_to_array(samples):
             for i in range(value.shape[-1]):
                 data.append(value[:, i])
                 names.append(f"{key}_{i}")
+        elif value.ndim == 3:
+            for i in range(value.shape[-1]):
+                for j in range(value.shape[-2]):
+                    data.append(value[:, j, i])
+                    names.append(f"{key}_{j}_{i}")
         else:
             raise ValueError("Invalid dimensionality of samples to stack.")
 
