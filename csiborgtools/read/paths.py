@@ -15,11 +15,12 @@
 """
 CSiBORG paths manager.
 """
+import datetime
 from glob import glob
-from os import makedirs, listdir
-from os.path import isdir, join
-from warnings import warn
+from os import listdir, makedirs
+from os.path import exists, getmtime, isdir, join
 from re import search
+from warnings import warn
 
 import numpy
 
@@ -117,15 +118,15 @@ class Paths:
             files = glob(join(self.quijote_dir, "fiducial_processed",
                               "chain_*"))
             files = [int(search(r'chain_(\d+)', f).group(1)) for f in files]
-        elif simname == "Carrick2015":
-            return [0]
         elif simname == "CF4":
             files = glob(join(self.CF4_dir, "CF4_new_128-z008_realization*_delta.fits"))  # noqa
             files = [search(r'realization(\d+)_delta\.fits', file).group(1)
                      for file in files if search(r'realization(\d+)_delta\.fits', file)]  # noqa
             files = [int(file) for file in files]
-        elif simname == "Lilow2024":
-            return [0]
+            # Downsample to only 20 realisations
+            files = files[::5]
+        elif simname in ["Carrick2015", "Lilow2024", "no_field"] or "IndranilVoid" in simname:  # noqa
+            files = [0]
         else:
             raise ValueError(f"Unknown simulation name `{simname}`.")
 
@@ -635,6 +636,50 @@ class Paths:
         try_create_directory(fdir)
         return join(fdir, f"los_{catalogue}_{simnname}.hdf5")
 
+    def flow_validation(self, fdir, simname, catalogue, inference_method,
+                        smooth=None, nsim=None, zcmb_min=None, zcmb_max=None,
+                        mag_selection=None,  sample_alpha=False,
+                        sample_beta=False, sample_Vmono=False,
+                        sample_mag_dipole=False, sample_curvature=False):
+        """Flow validation file path."""
+        if isinstance(catalogue, list) and len(catalogue) == 1:
+            catalogue = catalogue[0]
+
+        if isinstance(catalogue, list):
+            catalogue = "_".join(catalogue)
+
+        if smooth == 0:
+            smooth = None
+
+        fname = f"samples_{simname}_{catalogue}_{inference_method}_"
+
+        keys = ["smooth", "nsim", "zcmb_min", "zcmb_max", "mag_selection",
+                "sample_alpha", "sample_beta", "sample_Vmono",
+                "sample_mag_dipole", "sample_curvature"]
+        values = [smooth, nsim, zcmb_min, zcmb_max, mag_selection,
+                  sample_alpha, sample_beta, sample_Vmono, sample_mag_dipole,
+                  sample_curvature]
+
+        for key, value in zip(keys, values):
+
+            if isinstance(value, bool):
+                if value:
+                    fname += f"{key}_"
+            elif value is not None:
+                fname += f"{key}_{value}_"
+
+        fname = fname.strip("_")
+        fname = join(fdir, f"{fname}.hdf5")
+        # Print the last modified time of the file if it exists.
+        if exists(fname):
+            mtime = getmtime(fname)
+            mtime = datetime.datetime.fromtimestamp(mtime)
+            mtime = mtime.strftime("%d/%m/%Y %H:%M:%S")
+            print(f"File:          {fname}")
+            print(f"Last modified: {mtime}")
+
+        return fname
+
     def field_projected(self, simname, kind):
         """
         Path to the files containing the projected fields on the sky.
@@ -653,5 +698,3 @@ class Paths:
         fdir = join(self.postdir, "field_projected")
         try_create_directory(fdir)
         return join(fdir, f"{simname}_{kind}_volume_weighted.hdf5")
-
-
