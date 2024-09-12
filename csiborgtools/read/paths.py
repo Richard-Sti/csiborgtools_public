@@ -125,7 +125,7 @@ class Paths:
             files = [int(file) for file in files]
             # Downsample to only 20 realisations
             files = files[::5]
-        elif simname in ["Carrick2015", "Lilow2024", "no_field"]:
+        elif simname in ["Carrick2015", "Lilow2024", "no_field", "CLONES"]:
             files = [0]
         elif "IndranilVoid" in simname:
             kind = simname.split("_")[-1]
@@ -411,6 +411,18 @@ class Paths:
             else:
                 raise ValueError(f"Unsupported Lilow2024 field: `{kind}`.")
 
+        if simname == "CF4":
+            basedir = "/mnt/extraspace/rstiskalek/catalogs/CF4"
+            if kind == "overdensity":
+                return join(
+                    basedir, f"CF4_new_128-z008_realization{nsim}_delta.fits")
+            elif kind == "velocity":
+                return join(
+                    basedir,
+                    f"CF4_new_128-z008_realization{nsim}_velocity.fits")
+            else:
+                raise ValueError(f"Unsupported CF4 field: `{kind}`.")
+
         if MAS == "SPH" and kind in ["density", "velocity"]:
             if simname == "csiborg1":
                 return join(self.csiborg1_srcdir, "field",
@@ -426,6 +438,13 @@ class Paths:
                             f"chain_{nsim}_{grid}.hdf5")
             elif simname == "quijote":
                 raise ValueError("SPH field not available for CSiBORG1.")
+            elif simname == "CLONES":
+                # NOTE eventually stop using local paths
+                basedir = "/mnt/extraspace/rstiskalek/CLONES/s8"
+                fname = "cf2gvpecc1pt5elmo73_sig6distribsbvoldi_RZA3Derrv2_512_500_ss8_zinit60_000.hdf5"  # noqa
+                return join(basedir, fname)
+            else:
+                raise ValueError(f"Unsupported simulation name `{simname}`.")
 
         fdir = join(self.postdir, "environment")
         try_create_directory(fdir)

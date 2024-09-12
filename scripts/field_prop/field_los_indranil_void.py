@@ -44,9 +44,7 @@ def interpolate_indranil_void(kind, nsims, RA, dec, rmax, dr, dump_folder,
 
         # The grid is in Mpc
         r_grid = np.arange(0, 251)
-        # NOTE: The shape of the files is no longer (181, 251). It is now
-        # (180, 251), asked Sergij about this. He will produce new files.
-        phi_grid = np.arange(0, len(data))
+        phi_grid = np.arange(0, 181)
         # The input is in Mpc/h, so we need to convert to Mpc
         r_eval = np.arange(0, rmax, dr).astype(float) / 0.674
 
@@ -83,7 +81,7 @@ def interpolate_indranil_void(kind, nsims, RA, dec, rmax, dr, dump_folder,
 
 
 if __name__ == "__main__":
-    kind = "exp"
+    kind = "gauss"
     rmax = 165
     dr = 1
 
@@ -93,7 +91,7 @@ if __name__ == "__main__":
 
     out_folder = "/mnt/extraspace/rstiskalek/csiborg_postprocessing/field_los"
 
-    for catalogue in ["LOSS", "Foundation", "2MTF", "SFI_gals", "CF4_TFR", "CF4_GroupAll"]:  # noqa
+    for catalogue in ["LOSS", "Foundation", "2MTF", "SFI_gals", "CF4_TFR"]:
         print(f"Running kind `{kind}` for catalogue `{catalogue}`.")
 
         RA, dec = get_los(catalogue, "", comm).T

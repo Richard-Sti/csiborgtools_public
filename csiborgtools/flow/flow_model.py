@@ -93,7 +93,7 @@ class DataLoader:
         if simname in ["Carrick2015", "Lilow2024"]:
             # Carrick+2015 and Lilow+2024 are in galactic coordinates
             d1, d2 = radec_to_galactic(self._cat["RA"], self._cat["DEC"])
-        elif "CF4" in simname:
+        elif simname in ["CF4", "CLONES"]:
             # CF4 is in supergalactic coordinates
             d1, d2 = radec_to_supergalactic(self._cat["RA"], self._cat["DEC"])
         else:
@@ -117,8 +117,8 @@ class DataLoader:
 
         self._Omega_m = simname2Omega_m(simname)
 
-        # Normalize the CSiBORG density by the mean matter density
-        if "csiborg" in simname:
+        # Normalize the CSiBORG & CLONES density by the mean matter density
+        if "csiborg" in simname or simname == "CLONES":
             cosmo = FlatLambdaCDM(H0=H0, Om0=self._Omega_m)
             mean_rho_matter = cosmo.critical_density0.to("Msun/kpc^3").value
             mean_rho_matter *= self._Omega_m
@@ -1013,6 +1013,7 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
                 "not_matched_to_2MTF_or_SFI", "Qs", "Qw"]
         RA, dec, z_obs, mag, eta, e_eta, not_matched_to_2MTF_or_SFI, Qs, Qw = (
             loader.cat[k] for k in keys)
+        l, b = radec_to_galactic(RA, dec)
 
         not_matched_to_2MTF_or_SFI = not_matched_to_2MTF_or_SFI.astype(bool)
         # NOTE: fiducial uncertainty until we can get the actual values.
@@ -1023,6 +1024,8 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
 
         fprint("selecting only galaxies with mag > 5 and eta > -0.3.")
         mask = (mag > 5) & (eta > -0.3)
+        fprint("selecting only galaxies with |b| > 7.5.")
+        mask &= np.abs(b) > 7.5
         mask &= (z_obs < zcmb_max) & (z_obs > zcmb_min)
 
         if "not2MTForSFI" in kind:
