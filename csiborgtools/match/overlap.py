@@ -454,7 +454,7 @@ class ParticleOverlap(BaseMatcher):
         mass2 : 1-dimensional array
             Particle masses of the second halo.
         mins1, maxs1 : 1-dimensional arrays of shape `(3,)`
-            Minimun and maximum cell numbers along each dimension of `halo1`.
+            Minimum and maximum cell numbers along each dimension of `halo1`.
             Optional.
         mins2, maxs2 : 1-dimensional arrays of shape `(3,)`
             Minimum and maximum cell numbers along each dimension of `halo2`.
