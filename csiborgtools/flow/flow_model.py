@@ -599,7 +599,7 @@ def sample_simple(e_mu_min, e_mu_max, dmu_min, dmu_max, alpha_min, alpha_max,
 
 def sample_calibration(Vext_min, Vext_max, Vmono_min, Vmono_max, beta_min,
                        beta_max, sigma_v_min, sigma_v_max, h_min, h_max,
-                       sample_Vext, sample_Vmono, sample_beta, sample_h):
+                       no_Vext, sample_Vmono, sample_beta, sample_h):
     """Sample the flow calibration."""
     sigma_v = sample("sigma_v", Uniform(sigma_v_min, sigma_v_max))
 
@@ -608,10 +608,10 @@ def sample_calibration(Vext_min, Vext_max, Vmono_min, Vmono_max, beta_min,
     else:
         beta = 1.0
 
-    if sample_Vext:
-        Vext = sample("Vext", Uniform(Vext_min, Vext_max).expand([3]))
-    else:
+    if no_Vext:
         Vext = jnp.zeros(3)
+    else:
+        Vext = sample("Vext", Uniform(Vext_min, Vext_max).expand([3]))
 
     if sample_Vmono:
         Vmono = sample("Vmono", Uniform(Vmono_min, Vmono_max))
