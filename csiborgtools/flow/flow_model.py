@@ -363,12 +363,11 @@ def predict_zobs(dist, beta, Vext_radial, vpec_radial, Omega_m):
 ###############################################################################
 
 
-def ptilde_wo_bias(xrange, mu, err_squared, r_squared_xrange):
+def log_ptilde_wo_bias(xrange, mu, err_squared, log_r_squared_xrange):
     """Calculate `ptilde(r)` without imhomogeneous Malmquist bias."""
-    ptilde = jnp.exp(-0.5 * (xrange - mu)**2 / err_squared)
-    ptilde /= jnp.sqrt(2 * np.pi * err_squared)
-    ptilde *= r_squared_xrange
-    return ptilde
+    return (-0.5 * (xrange - mu)**2 / err_squared
+            - 0.5 * jnp.log(2 * np.pi * err_squared)
+            + log_r_squared_xrange)
 
 
 def likelihood_zobs(zobs, zobs_pred, e2_cz):
@@ -406,8 +405,7 @@ class BaseFlowValidationModel(ABC):
             setattr(self, f"{name}", jnp.asarray(value))
 
     def _set_calibration_params(self, calibration_params):
-        names = []
-        values = []
+        names, values = [], []
         for key, value in calibration_params.items():
             names.append(key)
             values.append(value)
@@ -421,6 +419,28 @@ class BaseFlowValidationModel(ABC):
 
         self._setattr_as_jax(names, values)
 
+    def _set_abs_calibration_params(self, abs_calibration_params):
+        self.with_absolute_calibration = abs_calibration_params is not None
+
+        if abs_calibration_params is None:
+            self.with_absolute_calibration = False
+            return
+
+        self.calibration_distmod = jnp.asarray(
+            abs_calibration_params["calibration_distmod"][..., 0])
+        self.calibration_edistmod = jnp.asarray(
+            abs_calibration_params["calibration_distmod"][..., 1])
+        self.data_with_calibration = jnp.asarray(
+            abs_calibration_params["data_with_calibration"])
+        self.data_wo_calibration = ~self.data_with_calibration
+
+        # Calculate the log of the number of calibrators. Where there is no
+        # calibrator set the number of calibrators to 1 to avoid log(0) and
+        # this way only zeros are being added.
+        length_calibration = abs_calibration_params["length_calibration"]
+        length_calibration[length_calibration == 0] = 1
+        self.log_length_calibration = jnp.log(length_calibration)
+
     def _set_radial_spacing(self, r_xrange, Omega_m):
         cosmo = FlatLambdaCDM(H0=H0, Om0=Omega_m)
 
@@ -428,20 +448,18 @@ class BaseFlowValidationModel(ABC):
         r2_xrange = r_xrange**2
         r2_xrange /= r2_xrange.mean()
         self.r_xrange = r_xrange
-        self.r2_xrange = r2_xrange
+        self.log_r2_xrange = jnp.log(r2_xrange)
 
         # Require `zmin` < 0 because the first radial step is likely at 0.
         z_xrange = z_at_value(
             cosmo.comoving_distance, r_xrange * u.Mpc, zmin=-0.01)
         mu_xrange = cosmo.distmod(z_xrange).value
+        # In case the first distance is 0 and its distance modulus is infinite.
+        if not np.isfinite(mu_xrange[0]):
+            mu_xrange[0] = mu_xrange[1] - 1
+
         self.z_xrange = jnp.asarray(z_xrange)
         self.mu_xrange = jnp.asarray(mu_xrange)
-
-        # Get the stepsize, we need it to be constant for Simpson's rule.
-        dr = np.diff(r_xrange)
-        if not np.all(np.isclose(dr, dr[0], atol=1e-5)):
-            raise ValueError("The radial step size must be constant.")
-        self.dr = dr[0]
 
     @property
     def ndata(self):
@@ -451,7 +469,7 @@ class BaseFlowValidationModel(ABC):
     @property
     def num_sims(self):
         """Number of simulations."""
-        return len(self.los_density)
+        return len(self.log_los_density)
 
     @abstractmethod
     def __call__(self, **kwargs):
@@ -580,26 +598,38 @@ def sample_simple(e_mu_min, e_mu_max, dmu_min, dmu_max, alpha_min, alpha_max,
 
 
 def sample_calibration(Vext_min, Vext_max, Vmono_min, Vmono_max, beta_min,
-                       beta_max, sigma_v_min, sigma_v_max, sample_Vmono,
-                       sample_beta):
+                       beta_max, sigma_v_min, sigma_v_max, h_min, h_max,
+                       sample_Vext, sample_Vmono, sample_beta, sample_h):
     """Sample the flow calibration."""
     sigma_v = sample("sigma_v", Uniform(sigma_v_min, sigma_v_max))
-    Vext = sample("Vext", Uniform(Vext_min, Vext_max).expand([3]))
 
     if sample_beta:
         beta = sample("beta", Uniform(beta_min, beta_max))
     else:
         beta = 1.0
 
+    if sample_Vext:
+        Vext = sample("Vext", Uniform(Vext_min, Vext_max).expand([3]))
+    else:
+        Vext = jnp.zeros(3)
+
     if sample_Vmono:
         Vmono = sample("Vmono", Uniform(Vmono_min, Vmono_max))
     else:
         Vmono = 0.0
 
+    if sample_h:
+        h = sample("h", Uniform(h_min, h_max))
+    else:
+        h = 1.0
+
     return {"Vext": Vext,
             "Vmono": Vmono,
             "sigma_v": sigma_v,
-            "beta": beta}
+            "beta": beta,
+            "h": h,
+            "sample_h": sample_h,
+            }
 
 
 ###############################################################################
@@ -630,10 +660,12 @@ class PV_LogLikelihood(BaseFlowValidationModel):
         Observed redshifts.
     e_zobs : 1-dimensional array of shape (n_objects)
         Errors on the observed redshifts.
-    calibration_params: dict
+    calibration_params : dict
         Calibration parameters of each object.
+    abs_calibration_params : dict
+        Absolute calibration parameters.
     mag_selection : dict
-        Magnitude selection parameters.
+        Magnitude selection parameters, optional.
     r_xrange : 1-dimensional array
         Radial distances where the field was interpolated for each object.
     Omega_m : float
@@ -645,22 +677,23 @@ class PV_LogLikelihood(BaseFlowValidationModel):
     """
 
     def __init__(self, los_density, los_velocity, RA, dec, z_obs, e_zobs,
-                 calibration_params, mag_selection, r_xrange, Omega_m,
-                 kind, name):
+                 calibration_params, abs_calibration_params, mag_selection,
+                 r_xrange, Omega_m, kind, name):
         if e_zobs is not None:
             e2_cz_obs = jnp.asarray((SPEED_OF_LIGHT * e_zobs)**2)
         else:
             e2_cz_obs = jnp.zeros_like(z_obs)
 
         # Convert RA/dec to radians.
-        RA = np.deg2rad(RA)
-        dec = np.deg2rad(dec)
+        RA, dec = np.deg2rad(RA), np.deg2rad(dec)
 
-        names = ["los_density", "los_velocity", "RA", "dec", "z_obs",
+        names = ["log_los_density", "los_velocity", "RA", "dec", "z_obs",
                  "e2_cz_obs"]
-        values = [los_density, los_velocity, RA, dec, z_obs, e2_cz_obs]
+        values = [jnp.log(los_density), los_velocity, RA, dec, z_obs,
+                  e2_cz_obs]
         self._setattr_as_jax(names, values)
         self._set_calibration_params(calibration_params)
+        self._set_abs_calibration_params(abs_calibration_params)
         self._set_radial_spacing(r_xrange, Omega_m)
 
         self.kind = kind
@@ -765,6 +798,10 @@ class PV_LogLikelihood(BaseFlowValidationModel):
 
             mu = distmod_SN(
                 mag_true, x1_true, c_true, mag_cal, alpha_cal, beta_cal)
+
+            if field_calibration_params["sample_h"]:
+                raise NotImplementedError("H0 for SN not implemented.")
+
         elif self.kind == "TFR":
             a = distmod_params["a"]
             b = distmod_params["b"]
@@ -834,6 +871,11 @@ class PV_LogLikelihood(BaseFlowValidationModel):
                     e2_mu = jnp.ones_like(mag_true) * e_mu**2
 
             mu = distmod_TFR(mag_true, eta_true, a, b, c)
+
+            if field_calibration_params["sample_h"]:
+                raise NotImplementedError("H0 for TFR not implemented.")
+                # mu -= 5 * jnp.log10(field_calibration_params["h"])
+
         elif self.kind == "simple":
             dmu = distmod_params["dmu"]
 
@@ -852,19 +894,25 @@ class PV_LogLikelihood(BaseFlowValidationModel):
                     e2_mu = jnp.ones_like(mag_true) * e_mu**2
 
             mu = mu_true + dmu
+
+            if field_calibration_params["sample_h"]:
+                raise NotImplementedError("H0 for simple not implemented.")
         else:
             raise ValueError(f"Unknown kind: `{self.kind}`.")
 
         # Calculate p(r) (Malmquist bias). Shape is (ndata, nxrange)
-        ptilde = ptilde_wo_bias(
+        log_ptilde = log_ptilde_wo_bias(
             self.mu_xrange[None, :], mu[:, None], e2_mu[:, None],
-            self.r2_xrange[None, :])
+            self.log_r2_xrange[None, :])
+
         # Inhomogeneous Malmquist bias. Shape is (n_sims, ndata, nxrange)
         alpha = distmod_params["alpha"]
-        ptilde = ptilde[None, ...] * self.los_density**alpha
+        log_ptilde = log_ptilde[None, ...] + alpha * self.log_los_density
+
+        ptilde = jnp.exp(log_ptilde)
 
         # Normalization of p(r). Shape is (n_sims, ndata)
-        pnorm = simpson(ptilde, dx=self.dr, axis=-1)
+        pnorm = simpson(ptilde, x=self.r_xrange, axis=-1)
 
         # Calculate z_obs at each distance. Shape is (n_sims, ndata, nxrange)
         vrad = field_calibration_params["beta"] * self.los_velocity
@@ -872,10 +920,34 @@ class PV_LogLikelihood(BaseFlowValidationModel):
         zobs = (1 + self.z_xrange[None, None, :]) * (1 + vrad / SPEED_OF_LIGHT)
         zobs -= 1.
 
+        # Shape remains (n_sims, ndata, nxrange)
         ptilde *= likelihood_zobs(
             self.z_obs[None, :, None], zobs, e2_cz[None, :, None])
 
-        ll = jnp.log(simpson(ptilde, dx=self.dr, axis=-1)) - jnp.log(pnorm)
+        if self.with_absolute_calibration:
+            raise NotImplementedError("Absolute calibration not implemented.")
+            # Absolute calibration likelihood, the shape is now
+            # (ndata_with_calibration, ncalib, nxrange)
+            # ll_calibration = normal_logpdf(
+            #     self.mu_xrange[None, None, :],
+            #     self.calibration_distmod[..., None],
+            #     self.calibration_edistmod[..., None])
+
+            # # Average the likelihood over the calibration points. The shape
+            # is
+            # # now (ndata, nxrange)
+            # ll_calibration = logsumexp(
+            #     jnp.nan_to_num(ll_calibration, nan=-jnp.inf), axis=1)
+            # # This is the normalisation because we want the *average*.
+            # ll_calibration -= self.log_length_calibration[:, None]
+
+            # ptilde = ptilde.at[:, self.data_with_calibration, :].
+            # multiply(jnp.exp(ll_calibration))
+
+        # Integrate over the radial distance. Shape is (n_sims, ndata)
+        ll = jnp.log(simpson(ptilde, x=self.r_xrange, axis=-1))
+        ll -= jnp.log(pnorm)
+
         return ll0 + jnp.sum(logsumexp(ll, axis=0)) + self.norm
 
 
@@ -923,7 +995,54 @@ def PV_validation_model(models, distmod_hyperparams_per_model,
 ###############################################################################
 
 
-def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
+def read_absolute_calibration(kind, data_length, calibration_fpath):
+    """
+    Read the absolute calibration for the CF4 TFR sample from LEDA but
+    preprocessed by me.
+
+    Parameters
+    ----------
+    kind : str
+        Calibration kind: `Cepheids`, `TRGB`, `SBF`, ...
+    data_length : int
+        Number of samples in CF4 TFR (should be 9,788).
+    calibration_fpath : str
+        Path to the preprocessed calibration file.
+
+    Returns
+    -------
+    data : 3-dimensional array of shape (data_length, max_calib, 2)
+        Absolute calibration data.
+    with_calibration : 1-dimensional array of shape (data_length)
+        Whether the sample has a calibration.
+    length_calibration : 1-dimensional array of shape (data_length)
+        Number of calibration points per sample.
+    """
+    data = {}
+    with File(calibration_fpath, 'r') as f:
+        for key in f[kind].keys():
+            x = f[kind][key][:]
+
+            # Get rid of points without uncertainties
+            x = x[~np.isnan(x[:, 1])]
+
+            data[key] = x
+
+    max_calib = max(len(val) for val in data.values())
+
+    out = np.full((data_length, max_calib, 2), np.nan)
+    with_calibration = np.full(data_length, False)
+    length_calibration = np.full(data_length, 0)
+    for i in data.keys():
+        out[int(i), :len(data[i]), :] = data[i]
+        with_calibration[int(i)] = True
+        length_calibration[int(i)] = len(data[i])
+
+    return out, with_calibration, length_calibration
+
+
+def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None,
+              absolute_calibration=None, calibration_fpath=None):
     """
     Get a model and extract the relevant data from the loader.
 
@@ -937,6 +1056,9 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
         Maximum observed redshift in the CMB frame to include.
     mag_selection : dict, optional
         Magnitude selection parameters.
+    add_absolute_calibration : bool, optional
+        Whether to add an absolute calibration for CF4 TFRs.
+    calibration_fpath : str, optional
 
     Returns
     -------
@@ -948,6 +1070,9 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
     los_overdensity = loader.los_density
     los_velocity = loader.los_radial_velocity
     kind = loader._catname
+
+    if absolute_calibration is not None and "CF4_TFR_" not in kind:
+        raise ValueError("Absolute calibration supported only for the CF4 TFR sample.")  # noqa
 
     if kind in ["LOSS", "Foundation"]:
         keys = ["RA", "DEC", "z_CMB", "mB", "x1", "c", "e_mB", "e_x1", "e_c"]
@@ -963,7 +1088,8 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
         model = PV_LogLikelihood(
             los_overdensity[:, mask], los_velocity[:, mask],
             RA[mask], dec[mask], zCMB[mask], e_zCMB, calibration_params,
-            mag_selection, loader.rdist, loader._Omega_m, "SN", name=kind)
+            None, mag_selection, loader.rdist, loader._Omega_m, "SN",
+            name=kind)
     elif "Pantheon+" in kind:
         keys = ["RA", "DEC", "zCMB", "mB", "x1", "c", "biasCor_m_b", "mBERR",
                 "x1ERR", "cERR", "biasCorErr_m_b", "zCMB_SN", "zCMB_Group",
@@ -991,7 +1117,8 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
         model = PV_LogLikelihood(
             los_overdensity[:, mask], los_velocity[:, mask],
             RA[mask], dec[mask], zCMB[mask], e_zCMB[mask], calibration_params,
-            mag_selection, loader.rdist, loader._Omega_m, "SN", name=kind)
+            None, mag_selection, loader.rdist, loader._Omega_m, "SN",
+            name=kind)
     elif kind in ["SFI_gals", "2MTF", "SFI_gals_masked"]:
         keys = ["RA", "DEC", "z_CMB", "mag", "eta", "e_mag", "e_eta"]
         RA, dec, zCMB, mag, eta, e_mag, e_eta = (loader.cat[k] for k in keys)
@@ -1001,7 +1128,7 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
                               "e_mag": e_mag[mask], "e_eta": e_eta[mask]}
         model = PV_LogLikelihood(
             los_overdensity[:, mask], los_velocity[:, mask],
-            RA[mask], dec[mask], zCMB[mask], None, calibration_params,
+            RA[mask], dec[mask], zCMB[mask], None, calibration_params, None,
             mag_selection, loader.rdist, loader._Omega_m, "TFR", name=kind)
     elif "CF4_TFR_" in kind:
         # The full name can be e.g. "CF4_TFR_not2MTForSFI_i" or "CF4_TFR_i".
@@ -1039,12 +1166,34 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
         else:
             mask &= Qs == 5
 
+        # Read the absolute calibration
+        if absolute_calibration is not None:
+            CF4_length = len(RA)
+            distmod, with_calibration, length_calibration = read_absolute_calibration(  # noqa
+                "Cepheids", CF4_length, calibration_fpath)
+
+            distmod = distmod[mask]
+            with_calibration = with_calibration[mask]
+            length_calibration = length_calibration[mask]
+            fprint(f"found {np.sum(with_calibration)} galaxies with absolute calibration.")  # noqa
+
+            distmod = distmod[with_calibration]
+            length_calibration = length_calibration[with_calibration]
+
+            abs_calibration_params = {
+                "calibration_distmod": distmod,
+                "data_with_calibration": with_calibration,
+                "length_calibration": length_calibration}
+        else:
+            abs_calibration_params = None
+
         calibration_params = {"mag": mag[mask], "eta": eta[mask],
                               "e_mag": e_mag[mask], "e_eta": e_eta[mask]}
         model = PV_LogLikelihood(
             los_overdensity[:, mask], los_velocity[:, mask],
             RA[mask], dec[mask], z_obs[mask], None, calibration_params,
-            mag_selection, loader.rdist, loader._Omega_m, "TFR", name=kind)
+            abs_calibration_params, mag_selection, loader.rdist,
+            loader._Omega_m, "TFR", name=kind)
     elif kind in ["CF4_GroupAll"]:
         # Note, this for some reason works terribly.
         keys = ["RA", "DE", "Vcmb", "DMzp", "eDM"]
@@ -1059,7 +1208,7 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None):
         calibration_params = {"mu": mu[mask], "e_mu": e_mu[mask]}
         model = PV_LogLikelihood(
             los_overdensity[:, mask], los_velocity[:, mask],
-            RA[mask], dec[mask], zCMB[mask], None, calibration_params,
+            RA[mask], dec[mask], zCMB[mask], None, calibration_params, None,
             mag_selection,  loader.rdist, loader._Omega_m, "simple",
             name=kind)
     else:

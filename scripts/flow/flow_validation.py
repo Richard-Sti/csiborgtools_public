@@ -22,6 +22,19 @@ from argparse import ArgumentParser, ArgumentTypeError
 def none_or_int(value):
     if value.lower() == "none":
         return None
+
+    if "_" in value:
+        args = value.split("_")
+        if len(args) == 2:
+            k0, kf = args
+            dk = 1
+        elif len(args) == 3:
+            k0, kf, dk = args
+        else:
+            raise ArgumentTypeError(f"Invalid length of arguments: `{value}`.")
+
+        return [int(k) for k in range(int(k0), int(kf), int(dk))]
+
     try:
         return int(value)
     except ValueError:
@@ -73,17 +86,17 @@ def print_variables(names, variables):
     print(flush=True)
 
 
-def get_models(get_model_kwargs, mag_selection, verbose=True):
+def get_models(ksim, get_model_kwargs, mag_selection, verbose=True):
     """Load the data and create the NumPyro models."""
     paths = csiborgtools.read.Paths(**csiborgtools.paths_glamdring)
     folder = "/mnt/extraspace/rstiskalek/catalogs/"
 
     nsims = paths.get_ics(ARGS.simname)
-    if ARGS.ksim is None:
+    if ksim is None:
         nsim_iterator = [i for i in range(len(nsims))]
     else:
-        nsim_iterator = [ARGS.ksim]
-        nsims = [nsims[ARGS.ksim]]
+        nsim_iterator = [ksim]
+        nsims = [nsims[ksim]]
 
     if verbose:
         print(f"{'Simulation:':<20} {ARGS.simname}")
@@ -114,7 +127,7 @@ def get_models(get_model_kwargs, mag_selection, verbose=True):
         models[i] = csiborgtools.flow.get_model(
             loader, mag_selection=mag_selection[i], **get_model_kwargs)
 
-    print(f"\n{'Num. radial steps':<20} {len(loader.rdist)}\n", flush=True)
+    fprint(f"num. radial steps is {len(loader.rdist)}")
     return models
 
 
@@ -143,7 +156,7 @@ def run_model(model, nsteps, nburn,  model_kwargs, out_folder,
         raise AttributeError("The models must have an attribute `ndata` "
                              "indicating the number of data points.") from e
 
-    nuts_kernel = NUTS(model, init_strategy=init_to_median(num_samples=1000))
+    nuts_kernel = NUTS(model, init_strategy=init_to_median(num_samples=10000))
     mcmc = MCMC(nuts_kernel, num_warmup=nburn, num_samples=nsteps)
     rng_key = jax.random.PRNGKey(42)
 
@@ -283,11 +296,14 @@ if __name__ == "__main__":
     num_epochs = 50
     inference_method = "mike"
     mag_selection = None
-    sample_alpha = True
+    sample_alpha = False if "IndranilVoid_" in ARGS.simname else True
     sample_beta = None
+    sample_Vext = None
     sample_Vmono = False
     sample_mag_dipole = False
+    absolute_calibration = None
     calculate_harmonic = False if inference_method == "bayes" else True
+    sample_h = True if absolute_calibration is not None else False
 
     fname_kwargs = {"inference_method": inference_method,
                     "smooth": ARGS.ksmooth,
@@ -297,8 +313,10 @@ if __name__ == "__main__":
                     "mag_selection": mag_selection,
                     "sample_alpha": sample_alpha,
                     "sample_beta": sample_beta,
+                    "sample_Vext": sample_Vext,
                     "sample_Vmono": sample_Vmono,
                     "sample_mag_dipole": sample_mag_dipole,
+                    "absolute_calibration": absolute_calibration,
                     }
 
     main_params = {"nsteps": nsteps, "nburn": nburn,
@@ -310,6 +328,8 @@ if __name__ == "__main__":
                    "num_epochs": num_epochs,
                    "inference_method": inference_method,
                    "sample_mag_dipole": sample_mag_dipole,
+                   "absolute_calibration": absolute_calibration,
+                   "sample_h": sample_h,
                    }
     print_variables(main_params.keys(), main_params.values())
 
@@ -335,8 +355,11 @@ if __name__ == "__main__":
                                "Vmono_min": -1000, "Vmono_max": 1000,
                                "beta_min": -10.0, "beta_max": 10.0,
                                "sigma_v_min": 1.0, "sigma_v_max": 750.,
+                               "h_min": 0.01, "h_max": 5.0,
+                               "sample_Vext": True if sample_Vext is None else sample_Vext,  # noqa
                                "sample_Vmono": sample_Vmono,
                                "sample_beta": sample_beta,
+                               "sample_h": sample_h,
                                }
     print_variables(
         calibration_hyperparams.keys(), calibration_hyperparams.values())
@@ -353,17 +376,34 @@ if __name__ == "__main__":
 
     ###########################################################################
 
-    get_model_kwargs = {"zcmb_min": zcmb_min, "zcmb_max": zcmb_max}
-    models = get_models(get_model_kwargs, mag_selection)
-    model_kwargs = {
-        "models": models,
-        "field_calibration_hyperparams": calibration_hyperparams,
-        "distmod_hyperparams_per_model": distmod_hyperparams_per_catalogue,
-        "inference_method": inference_method,
+    get_model_kwargs = {
+        "zcmb_min": zcmb_min,
+        "zcmb_max": zcmb_max,
+        "absolute_calibration": absolute_calibration,
+        "calibration_fpath": "/mnt/extraspace/rstiskalek/catalogs/PV/CF4/CF4_TF_calibration.hdf5",  # noqa
         }
 
-    model = csiborgtools.flow.PV_validation_model
+    # In case we want to run multiple simulations independently.
+    if not isinstance(ARGS.ksim, list):
+        ksim_iterator = [ARGS.ksim]
+    else:
+        ksim_iterator = ARGS.ksim
 
-    run_model(model, nsteps, nburn, model_kwargs, out_folder,
-              calculate_harmonic, nchains_harmonic, num_epochs, kwargs_print,
-              fname_kwargs)
+    for i, ksim in enumerate(ksim_iterator):
+        if len(ksim_iterator) > 1:
+            print(f"{'Current simulation:':<20} {i + 1} ({ksim}) out of {len(ksim_iterator)}.")  # noqa
+
+        fname_kwargs["nsim"] = ksim
+        models = get_models(ksim, get_model_kwargs, mag_selection)
+        model_kwargs = {
+            "models": models,
+            "field_calibration_hyperparams": calibration_hyperparams,
+            "distmod_hyperparams_per_model": distmod_hyperparams_per_catalogue,
+            "inference_method": inference_method,
+            }
+
+        model = csiborgtools.flow.PV_validation_model
+
+        run_model(model, nsteps, nburn, model_kwargs, out_folder,
+                  calculate_harmonic, nchains_harmonic, num_epochs,
+                  kwargs_print, fname_kwargs)
