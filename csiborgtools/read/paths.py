@@ -673,7 +673,8 @@ class Paths:
                         mag_selection=None,  sample_alpha=False,
                         sample_beta=False, no_Vext=None,
                         sample_Vmono=False, sample_mag_dipole=False,
-                        sample_curvature=False, absolute_calibration=None):
+                        sample_curvature=False, absolute_calibration=None,
+                        verbose_print=True):
         """Flow validation file path."""
         if isinstance(catalogue, list) and len(catalogue) == 1:
             catalogue = catalogue[0]
@@ -705,7 +706,7 @@ class Paths:
         fname = fname.strip("_")
         fname = join(fdir, f"{fname}.hdf5")
         # Print the last modified time of the file if it exists.
-        if exists(fname):
+        if verbose_print and exists(fname):
             mtime = getmtime(fname)
             mtime = datetime.datetime.fromtimestamp(mtime)
             mtime = mtime.strftime("%d/%m/%Y %H:%M:%S")
