@@ -157,6 +157,9 @@ def simname_to_pretty(simname):
            "CF4": "Courtois+23",
            "CF4gp": "CF4group",
            "CLONES": "Sorce+2018",
+           "IndranilVoid_exp": "Exponential",
+           "IndranilVoid_gauss": "Gaussian",
+           "IndranilVoid_mb": "Maxwell-Boltzmann",
            }
 
     if isinstance(simname, list):
