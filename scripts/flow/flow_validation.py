@@ -354,7 +354,7 @@ if __name__ == "__main__":
     calibration_hyperparams = {"Vext_min": -3000, "Vext_max": 3000,
                                "Vmono_min": -1000, "Vmono_max": 1000,
                                "beta_min": -10.0, "beta_max": 10.0,
-                               "sigma_v_min": 1.0, "sigma_v_max": 750.,
+                               "sigma_v_min": 1.0, "sigma_v_max": 5000 if "IndranilVoid_" in ARGS.simname else 750.,  # noqa
                                "h_min": 0.01, "h_max": 5.0,
                                "no_Vext": False if no_Vext is None else no_Vext,  # noqa
                                "sample_Vmono": sample_Vmono,
