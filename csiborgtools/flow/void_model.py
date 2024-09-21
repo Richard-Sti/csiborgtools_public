@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-"""Function to work with the void data from Sergij & Indranil's files."""
+"""Functions to work with the void data from Sergij & Indranil's files."""
 
 from glob import glob
 from os.path import join
