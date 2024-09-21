@@ -118,6 +118,8 @@ class Paths:
                 fdir = join(fdir, "2MPP_N128_DES_V1", "resimulations", "R512")
                 files = glob(join(fdir, "mcmc_*"))
                 files = [int(search(r'mcmc_(\d+)', f).group(1)) for f in files]
+            else:
+                raise ValueError(f"Unknown MANTICORE simulation `{simname}`.")
         elif simname == "csiborg2X":
             # NOTE this too is preliminary
             fname = "/mnt/extraspace/rstiskalek/MANTICORE/resimulations/fields/2MPP_N128_DES_PROD/R512"  # noqa
@@ -134,7 +136,7 @@ class Paths:
                      for file in files if search(r'realization(\d+)_delta\.fits', file)]  # noqa
             files = [int(file) for file in files]
             # Downsample to only 20 realisations
-            files = files[::5]
+            # files = files[::5]
         elif simname in ["Carrick2015", "Lilow2024", "no_field", "CLONES"]:
             files = [0]
         elif "IndranilVoid" in simname:
@@ -214,9 +216,21 @@ class Paths:
                          f"chain_16417_{str(nsim).zfill(3)}", "output",
                          f"snapshot_{str(nsnap).zfill(3)}.hdf5")
         elif simname == "csiborg2X":
-            raise ValueError("Snapshots not available for CSiBORG2X.")
+            raise ValueError("Snapshots not available for CSiBORG2X based on "
+                             "Stephen's ICs.")
         elif "manticore" in simname:
-            raise ValueError("Snapshots not available for MANTICORE.")
+            fdir = self.manticore_dir
+            if simname == "manticore_2MPP_N128_DES_V1":
+                if nsnap != 1:
+                    raise ValueError("Only snapshot 1 is available for "
+                                     "MANTICORE 2MPP_N128_DES_V1.")
+
+                fdir = join(fdir, "2MPP_N128_DES_V1", "resimulations", "R512")
+                nsnap_str = str(nsnap).zfill(4)
+                fpath = join(fdir, f"mcmc_{nsim}", "swift_monofonic",
+                             f"snap_{nsnap_str}", f"snap_{nsnap_str}.hdf5")
+            else:
+                raise ValueError(f"Unknown MANTICORE simulation `{simname}`.")
         elif simname == "quijote":
             fpath = join(self.quijote_dir, "fiducial_processed",
                          f"chain_{nsim}",
@@ -406,6 +420,11 @@ class Paths:
                 return join(basedir, f"mcmc_{nsim}", "vel_field.hdf5")
             else:
                 raise ValueError(f"Unsupported CSiBORG2X field: `{kind}`.")
+
+        if simname == "manticore_2MPP_N128_DES_V1":
+            basedir = join(self.manticore_dir, "2MPP_N128_DES_V1",
+                           "fields", "R512")
+            return join(basedir, f"SPH_{nsim}.hdf5")
 
         if simname == "Carrick2015":
             basedir = "/mnt/extraspace/rstiskalek/catalogs"

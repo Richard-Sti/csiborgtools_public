@@ -179,7 +179,9 @@ def get_field(simname, nsim, kind, MAS, grid):
         simkind = simname.split("_")[-1]
         field_reader = csiborgtools.read.CSiBORG2Field(nsim, simkind)
     elif simname == "csiborg2X":
-        field_reader = csiborgtools.read.CSiBORG2XField(nsim)
+        field_reader = csiborgtools.read.CSiBORG2XField(nsim, version=0)
+    elif simname == "manticore_2MPP_N128_DES_V1":
+        field_reader = csiborgtools.read.CSiBORG2XField(nsim, version=1)
     elif simname == "CLONES":
         field_reader = csiborgtools.read.CLONESField(nsim)
     elif simname == "Carrick2015":
@@ -429,10 +431,10 @@ if __name__ == "__main__":
 
     Om0 = csiborgtools.simname2Omega_m(args.simname)
     # r = make_spacing(200, 0.75, 23.25, 34, 0.01, Om0)
-    r = np.arange(0, 200, 0.75)
+    r = np.arange(0, 200, 0.5)
 
     # smooth_scales = [0, 2, 4, 6, 8]
-    smooth_scales = [0]
+    smooth_scales = [0, 8]
 
     print(f"Running catalogue {args.catalogue} for simulation {args.simname} "
           f"with {len(r)} radial points.")
