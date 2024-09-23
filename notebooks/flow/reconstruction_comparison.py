@@ -59,6 +59,7 @@ def names_to_latex(names, for_corner=False):
            "mag_cal": "\\mathcal{M}",
            "l": "\\ell ~ [\\mathrm{deg}]",
            "b": "b ~ [\\mathrm{deg}]",
+           "rLG": "R_{\\rm offset} ~ [\\mathrm{Mpc} / h]",
            }
 
     ltx_corner = {"alpha": r"$\alpha$",
@@ -209,17 +210,18 @@ def get_samples(fname, convert_Vext_to_galactic=True):
         for key in grp.keys():
             samples[key] = grp[key][...]
 
-    if convert_Vext_to_galactic:
-        Vext = samples.pop("Vext")
-        samples["Vmag"] = np.linalg.norm(Vext, axis=1)
-        Vext = csiborgtools.cartesian_to_radec(Vext)
-        samples["l"], samples["b"] = csiborgtools.radec_to_galactic(
-            Vext[:, 1], Vext[:, 2])
-    else:
-        Vext = samples.pop("Vext")
-        samples["Vx"] = Vext[:, 0]
-        samples["Vy"] = Vext[:, 1]
-        samples["Vz"] = Vext[:, 2]
+    if "Vext" in samples:
+        if convert_Vext_to_galactic:
+            Vext = samples.pop("Vext")
+            samples["Vmag"] = np.linalg.norm(Vext, axis=1)
+            Vext = csiborgtools.cartesian_to_radec(Vext)
+            samples["l"], samples["b"] = csiborgtools.radec_to_galactic(
+                Vext[:, 1], Vext[:, 2])
+        else:
+            Vext = samples.pop("Vext")
+            samples["Vx"] = Vext[:, 0]
+            samples["Vy"] = Vext[:, 1]
+            samples["Vz"] = Vext[:, 2]
 
     keys = list(samples.keys())
     for key in keys:
