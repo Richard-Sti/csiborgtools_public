@@ -232,7 +232,7 @@ def run_model(model, nsteps, nburn,  model_kwargs, out_folder,
 ###############################################################################
 
 def get_distmod_hyperparams(catalogue, sample_alpha, sample_mag_dipole):
-    alpha_min = -10 if "IndraniVoid" in ARGS.simname else -1.0
+    alpha_min = -10 if "IndranilVoid" in ARGS.simname else -1.0
     alpha_max = 10.0
 
     if catalogue in ["LOSS", "Foundation", "Pantheon+", "Pantheon+_groups", "Pantheon+_zSN"]:  # noqa
