@@ -607,10 +607,15 @@ class PV_LogLikelihood(BaseFlowValidationModel):
         Vmono = field_calibration_params["Vmono"]
         Vext_rad = project_Vext(Vext[0], Vext[1], Vext[2], self.RA, self.dec)
 
+        e_mu = distmod_params["e_mu"]
+
+        # Jeffrey's prior on sigma_v and the intrinsic scatter, they are above
+        # "sampled" from uniform distributions.
+        ll0 -= jnp.log(sigma_v) + jnp.log(e_mu)
+
         # ------------------------------------------------------------
         # 1. Sample true observables and obtain the distance estimate
         # ------------------------------------------------------------
-        e_mu = distmod_params["e_mu"]
         if self.kind == "SN":
             mag_cal = distmod_params["mag_cal"]
             alpha_cal = distmod_params["alpha_cal"]
@@ -623,6 +628,9 @@ class PV_LogLikelihood(BaseFlowValidationModel):
                     "x1", self.name, self.x1_min, self.x1_max)
                 c_mean, c_std = sample_gaussian_hyperprior(
                     "c", self.name, self.c_min, self.c_max)
+
+                # Jeffrey's prior on the the MNR hyperprior widths.
+                ll0 -= jnp.log(mag_std) + jnp.log(x1_std) + jnp.log(c_std)
 
                 # NOTE: that the true variables are currently uncorrelated.
                 with plate(f"true_SN_{self.name}", self.ndata):
@@ -674,6 +682,9 @@ class PV_LogLikelihood(BaseFlowValidationModel):
                     "eta", self.name, self.eta_min, self.eta_max)
                 corr_mag_eta = sample(
                     f"corr_mag_eta_{self.name}", Uniform(-1, 1))
+
+                # Jeffrey's prior on the the MNR hyperprior widths.
+                ll0 -= jnp.log(mag_std) + jnp.log(eta_std)
 
                 loc = jnp.array([mag_mean, eta_mean])
                 cov = jnp.array(
