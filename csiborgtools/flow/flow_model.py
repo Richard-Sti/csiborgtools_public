@@ -925,10 +925,17 @@ def PV_validation_model(models, distmod_hyperparams_per_model,
     inference_method : str
         Either `mike` or `bayes`.
     """
+    ll = 0.0
+
     field_calibration_params = sample_calibration(
         **field_calibration_hyperparams)
 
-    ll = 0.0
+    # We sample the components of Vext with a uniform prior, which means
+    # there is a |Vext|^2 prior, we correct for this so that the sampling
+    # is effecitvely uniformly in magnitude of Vext and angles.
+    if "Vext" in field_calibration_params:
+        ll -= jnp.log(jnp.sum(field_calibration_params["Vext"]**2))
+
     for n in range(len(models)):
         model = models[n]
         name = model.name
