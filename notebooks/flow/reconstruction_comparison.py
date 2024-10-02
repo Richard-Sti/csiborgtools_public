@@ -61,6 +61,7 @@ def names_to_latex(names, for_corner=False):
            "b": "b ~ [\\mathrm{deg}]",
            "rLG": "R_{\\rm offset} ~ [\\mathrm{Mpc} / h]",
            "Vext_axis_mag": "V_{\\rm axis} ~ [\\mathrm{km} / \\mathrm{s}]",
+           "Vvoid": "\\tilde{V}_{\\rm void} ~ [\\mathrm{km} / \\mathrm{s}]",
            }
 
     ltx_corner = {"alpha": r"$\alpha$",
@@ -72,6 +73,7 @@ def names_to_latex(names, for_corner=False):
                   "alpha_cal": r"$\mathcal{A}$",
                   "beta_cal": r"$\mathcal{B}$",
                   "mag_cal": r"$\mathcal{M}$",
+                  "Vvoid": r"$\tilde{V}_{\rm void}$",
                   }
 
     names = copy(names)
