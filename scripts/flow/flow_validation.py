@@ -307,7 +307,7 @@ if __name__ == "__main__":
     num_epochs = 50
     inference_method = "mike"
     mag_selection = None
-    sample_alpha = False if ARGS.simname == "no_field" else True
+    sample_alpha = False if (ARGS.simname == "no_field" or "IndranilVoid" in ARGS.simname) else True  # noqa
     sample_beta = None
     no_Vext = None
     sample_Vmag_vax = False
