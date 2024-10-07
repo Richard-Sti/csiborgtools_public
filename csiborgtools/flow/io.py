@@ -20,6 +20,7 @@ from h5py import File
 from ..params import SPEED_OF_LIGHT, simname2Omega_m
 from ..utils import fprint, radec_to_galactic, radec_to_supergalactic
 from .flow_model import PV_LogLikelihood
+from .void_model import load_void_data, mock_void, select_void_h
 
 H0 = 100  # km / s / Mpc
 
@@ -242,6 +243,25 @@ class DataLoader:
                 arr = np.empty(len(f["RA"]), dtype=dtype)
                 for key in f.keys():
                     arr[key] = f[key][:]
+        elif "IndranilVoidTFRMock" in catalogue:
+            # The name can be e.g. "IndranilVoidTFRMock_exp_34_0", where the
+            # first and second number are the LG observer index and random
+            # seed.
+            profile, rLG_index, seed = catalogue.split("_")[1:]
+            rLG_index = int(rLG_index)
+            seed = int(seed)
+            rLG, vrad_data = load_void_data(profile, "vrad")
+            h = select_void_h(profile)
+            print(f"Mock observed galaxies for LG observer with index "
+                  f"{rLG_index} at {rLG[rLG_index] * h} Mpc / h and "
+                  f"seed {seed}.")
+            mock_data = mock_void(vrad_data, rLG_index, profile, seed=seed)[0]
+
+            # Convert the dictionary to a structured array
+            dtype = [(key, np.float32) for key in mock_data.keys()]
+            arr = np.empty(len(mock_data["RA"]), dtype=dtype)
+            for key in mock_data.keys():
+                arr[key] = mock_data[key]
         elif "UPGLADE" in catalogue:
             with File(catalogue_fpath, 'r') as f:
                 dtype = [(key, np.float32) for key in f.keys()]
@@ -354,8 +374,8 @@ def mask_fields(density, velocity, mask, return_none):
 
 
 def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None,
-              absolute_calibration=None, calibration_fpath=None,
-              void_kwargs=None):
+              wo_num_dist_marginalisation=False, absolute_calibration=None,
+              calibration_fpath=None, void_kwargs=None):
     """
     Get a model and extract the relevant data from the loader.
 
@@ -369,9 +389,14 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None,
         Maximum observed redshift in the CMB frame to include.
     mag_selection : dict, optional
         Magnitude selection parameters.
+    wo_num_dist_marginalisation : bool, optional
+        Whether to directly sample the distance without numerical
+        marginalisation. in which case the tracers can be coupled by a
+        covariance matrix. By default `False`.
     add_absolute_calibration : bool, optional
         Whether to add an absolute calibration for CF4 TFRs.
     calibration_fpath : str, optional
+        Path to the file containing the absolute calibration of CF4 TFR.
 
     Returns
     -------
@@ -418,7 +443,8 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None,
             los_overdensity, los_velocity,
             RA[mask], dec[mask], zCMB[mask], e_zCMB, calibration_params,
             None, mag_selection, loader.rdist, loader._Omega_m, "SN",
-            name=kind, void_kwargs=void_kwargs)
+            name=kind, void_kwargs=void_kwargs,
+            wo_num_dist_marginalisation=wo_num_dist_marginalisation)
     elif "Pantheon+" in kind:
         keys = ["RA", "DEC", "zCMB", "mB", "x1", "c", "biasCor_m_b", "mBERR",
                 "x1ERR", "cERR", "biasCorErr_m_b", "zCMB_SN", "zCMB_Group",
@@ -451,8 +477,9 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None,
             los_overdensity, los_velocity,
             RA[mask], dec[mask], zCMB[mask], e_zCMB[mask], calibration_params,
             None, mag_selection, loader.rdist, loader._Omega_m, "SN",
-            name=kind, void_kwargs=void_kwargs)
-    elif kind in ["SFI_gals", "2MTF", "SFI_gals_masked"]:
+            name=kind, void_kwargs=void_kwargs,
+            wo_num_dist_marginalisation=wo_num_dist_marginalisation)
+    elif kind in ["SFI_gals", "2MTF", "SFI_gals_masked"] or "IndranilVoidTFRMock" in kind:  # noqa
         keys = ["RA", "DEC", "z_CMB", "mag", "eta", "e_mag", "e_eta"]
         RA, dec, zCMB, mag, eta, e_mag, e_eta = (loader.cat[k] for k in keys)
 
@@ -467,7 +494,8 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None,
             los_overdensity, los_velocity,
             RA[mask], dec[mask], zCMB[mask], None, calibration_params, None,
             mag_selection, loader.rdist, loader._Omega_m, "TFR", name=kind,
-            void_kwargs=void_kwargs)
+            void_kwargs=void_kwargs,
+            wo_num_dist_marginalisation=wo_num_dist_marginalisation)
     elif "CF4_TFR_" in kind:
         # The full name can be e.g. "CF4_TFR_not2MTForSFI_i" or "CF4_TFR_i".
         band = kind.split("_")[-1]
@@ -535,7 +563,8 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None,
             los_overdensity, los_velocity,
             RA[mask], dec[mask], z_obs[mask], None, calibration_params,
             abs_calibration_params, mag_selection, loader.rdist,
-            loader._Omega_m, "TFR", name=kind, void_kwargs=void_kwargs)
+            loader._Omega_m, "TFR", name=kind, void_kwargs=void_kwargs,
+            wo_num_dist_marginalisation=wo_num_dist_marginalisation)
     elif kind in ["CF4_GroupAll"]:
         # Note, this for some reason works terribly.
         keys = ["RA", "DE", "Vcmb", "DMzp", "eDM"]
@@ -556,7 +585,8 @@ def get_model(loader, zcmb_min=None, zcmb_max=None, mag_selection=None,
             los_overdensity, los_velocity,
             RA[mask], dec[mask], zCMB[mask], None, calibration_params, None,
             mag_selection,  loader.rdist, loader._Omega_m, "simple",
-            name=kind, void_kwargs=void_kwargs)
+            name=kind, void_kwargs=void_kwargs,
+            wo_num_dist_marginalisation=wo_num_dist_marginalisation)
     else:
         raise ValueError(f"Catalogue `{kind}` not recognized.")
 
