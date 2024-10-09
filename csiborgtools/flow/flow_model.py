@@ -170,28 +170,6 @@ class BaseFlowValidationModel(ABC):
 
         self._setattr_as_jax(names, values)
 
-    def _set_abs_calibration_params(self, abs_calibration_params):
-        self.with_absolute_calibration = abs_calibration_params is not None
-
-        if abs_calibration_params is None:
-            self.with_absolute_calibration = False
-            return
-
-        self.calibration_distmod = jnp.asarray(
-            abs_calibration_params["calibration_distmod"][..., 0])
-        self.calibration_edistmod = jnp.asarray(
-            abs_calibration_params["calibration_distmod"][..., 1])
-        self.data_with_calibration = jnp.asarray(
-            abs_calibration_params["data_with_calibration"])
-        self.data_wo_calibration = ~self.data_with_calibration
-
-        # Calculate the log of the number of calibrators. Where there is no
-        # calibrator set the number of calibrators to 1 to avoid log(0) and
-        # this way only zeros are being added.
-        length_calibration = abs_calibration_params["length_calibration"]
-        length_calibration[length_calibration == 0] = 1
-        self.log_length_calibration = jnp.log(length_calibration)
-
     def _set_radial_spacing(self, r_xrange, Omega_m):
         cosmo = FlatLambdaCDM(H0=H0, Om0=Omega_m)
 
@@ -356,7 +334,8 @@ def e2_distmod_TFR(e2_mag, e2_eta, eta, b, c, e_mu_intrinsic):
 
 def sample_TFR(e_mu_min, e_mu_max, a_mean, a_std, b_mean, b_std,
                c_mean, c_std, alpha_min, alpha_max, sample_alpha,
-               a_dipole_mean, a_dipole_std, sample_a_dipole, name):
+               a_dipole_mean, a_dipole_std, sample_a_dipole,
+               sample_curvature, name):
     """Sample Tully-Fisher calibration parameters."""
     e_mu = sample(f"e_mu_{name}", Uniform(e_mu_min, e_mu_max))
     a = sample(f"a_{name}", Normal(a_mean, a_std))
@@ -367,7 +346,11 @@ def sample_TFR(e_mu_min, e_mu_max, a_mean, a_std, b_mean, b_std,
         ax, ay, az = 0.0, 0.0, 0.0
 
     b = sample(f"b_{name}", Normal(b_mean, b_std))
-    c = sample(f"c_{name}", Normal(c_mean, c_std))
+
+    if sample_curvature:
+        c = sample(f"c_{name}", Normal(c_mean, c_std))
+    else:
+        c = 0.
 
     alpha = sample_alpha_bias(name, alpha_min, alpha_max, sample_alpha)
 
@@ -495,8 +478,6 @@ class PV_LogLikelihood(BaseFlowValidationModel):
         Errors on the observed redshifts.
     calibration_params : dict
         Calibration parameters of each object.
-    abs_calibration_params : dict
-        Absolute calibration parameters.
     mag_selection : dict
         Magnitude selection parameters, optional.
     r_xrange : 1-dimensional array
@@ -513,12 +494,17 @@ class PV_LogLikelihood(BaseFlowValidationModel):
         Whether to directly sample the distance without numerical
         marginalisation. in which case the tracers can be coupled by a
         covariance matrix. By default `False`.
+    with_homogeneous_malmquist : bool, optional
+        Whether to include the homogeneous Malmquist bias. By default `True`.
+    with_inhomogeneous_malmquist : bool, optional
+        Whether to include the inhomogeneous Malmquist bias. By default `True`.
     """
 
     def __init__(self, los_density, los_velocity, RA, dec, z_obs, e_zobs,
-                 calibration_params, abs_calibration_params, mag_selection,
-                 r_xrange, Omega_m, kind, name, void_kwargs=None,
-                 wo_num_dist_marginalisation=False):
+                 calibration_params, mag_selection, r_xrange, Omega_m, kind,
+                 name, void_kwargs=None, wo_num_dist_marginalisation=False,
+                 with_homogeneous_malmquist=True,
+                 with_inhomogeneous_malmquist=True):
         if e_zobs is not None:
             e2_cz_obs = jnp.asarray((SPEED_OF_LIGHT * e_zobs)**2)
         else:
@@ -550,13 +536,14 @@ class PV_LogLikelihood(BaseFlowValidationModel):
 
         self._setattr_as_jax(names, values)
         self._set_calibration_params(calibration_params)
-        self._set_abs_calibration_params(abs_calibration_params)
         self._set_radial_spacing(r_xrange, Omega_m)
 
         self.kind = kind
         self.name = name
         self.Omega_m = Omega_m
         self.wo_num_dist_marginalisation = wo_num_dist_marginalisation
+        self.with_homogeneous_malmquist = with_homogeneous_malmquist
+        self.with_inhomogeneous_malmquist = with_inhomogeneous_malmquist
         self.norm = - self.ndata * jnp.log(self.num_sims)
 
         if mag_selection is not None:
@@ -771,9 +758,14 @@ class PV_LogLikelihood(BaseFlowValidationModel):
                     "marginalising the true distance.")
 
             # Calculate p(r) (Malmquist bias). Shape is (ndata, nxrange)
-            log_ptilde = log_ptilde_wo_bias(
-                self.mu_xrange[None, :], mu[:, None], e2_mu[:, None],
-                self.log_r2_xrange[None, :])
+            if self.with_homogeneous_malmquist:
+                log_ptilde = log_ptilde_wo_bias(
+                    self.mu_xrange[None, :], mu[:, None], e2_mu[:, None],
+                    self.log_r2_xrange[None, :])
+            else:
+                log_ptilde = log_ptilde_wo_bias(
+                    self.mu_xrange[None, :], mu[:, None], e2_mu[:, None],
+                    0.)
 
             if self.is_void_data:
                 rLG = field_calibration_params["rLG"]
@@ -785,7 +777,9 @@ class PV_LogLikelihood(BaseFlowValidationModel):
 
             # Inhomogeneous Malmquist bias. Shape: (nsims, ndata, nxrange)
             alpha = distmod_params["alpha"]
-            log_ptilde = log_ptilde[None, ...] + alpha * log_los_density
+            log_ptilde = log_ptilde[None, ...]
+            if self.with_inhomogeneous_malmquist:
+                log_ptilde += alpha * log_los_density
 
             ptilde = jnp.exp(log_ptilde)
             # Normalization of p(r). Shape: (nsims, ndata)
@@ -802,29 +796,51 @@ class PV_LogLikelihood(BaseFlowValidationModel):
             ptilde *= likelihood_zobs(
                 self.z_obs[None, :, None], zobs, e2_cz[None, :, None])
 
-            if self.with_absolute_calibration:
-                raise NotImplementedError(
-                    "Absolute calibration not implemented for this model. "
-                    "Use `PV_LogLikelihood_NoDistMarg` instead.")
-
             # Integrate over the radial distance. Shape: (nsims, ndata)
             ll = jnp.log(simpson(ptilde, x=self.r_xrange, axis=-1))
             ll -= jnp.log(pnorm)
 
             return ll0 + jnp.sum(logsumexp(ll, axis=0)) + self.norm
         else:
-            if field_calibration_params["sample_h"]:
-                raise NotImplementedError(
-                    "Sampling of h is not yet implemented.")
-
             e_mu = jnp.sqrt(e2_mu)
-            # True distance modulus, shape is `(n_data)``
+            # True distance modulus, shape is `(n_data)`. If we have absolute
+            # calibration, then this distance modulus assumes a particular h.
             with plate("plate_mu", self.ndata):
                 mu_true = sample("mu", Normal(mu, e_mu))
 
-            # True distance and redshift, shape is `(n_data)`.
-            r_true = distmod2dist(mu_true, self.Omega_m)
-            z_true = distmod2redshift(mu_true, self.Omega_m)
+            # Likelihood of the true distance modulii given the calibration.
+            if field_calibration_params["sample_h"]:
+                raise RuntimeError(
+                    "Sampling of 'h' has not yet been thoroughly tested.")
+                h = field_calibration_params["h"]
+
+                # Now, the rest of the code except the calibration likelihood
+                # uses the distance modulus in units of h
+                mu_true_h = mu_true + 5 * jnp.log10(h)
+
+                # Calculate the log-likelihood of the calibration, but the
+                # shape is `(n_calibrators, n_data)`. Where there is no data
+                # we set the likelihood to 0 (or the log-likelihood to -inf)
+                ll_calibration = jnp.where(
+                   self.is_finite_calibrator,
+                   normal_logpdf(self.mu_calibration, mu_true[None, :],
+                                 self.e_mu_calibration),
+                   -jnp.inf)
+
+                # Now average out over the calibrators, however only if the
+                # there is at least one calibrator. If there isn't, then we
+                # just assing a log-likelihood of 0.
+                ll_calibration = jnp.where(
+                    self.any_calibrator,
+                    logsumexp(ll_calibration, axis=0) - jnp.log(self.counts_calibrators),  # noqa
+                    0.)
+            else:
+                mu_true_h = mu_true
+
+            # True distance and redshift, shape is `(n_data)`. The distance
+            # here is in units of `Mpc / h``.
+            r_true = distmod2dist(mu_true_h, self.Omega_m)
+            z_true = distmod2redshift(mu_true_h, self.Omega_m)
 
             if self.is_void_data:
                 raise NotImplementedError(
@@ -840,26 +856,29 @@ class PV_LogLikelihood(BaseFlowValidationModel):
             alpha = distmod_params["alpha"]
 
             # Normalisation of p(mu), shape is `(n_sims, n_data, n_rad)`
-            pnorm = (
-                + self.log_r2_xrange[None, None, :]
-                + alpha * log_los_density_grid
-                + normal_logpdf(
-                    self.mu_xrange[None, :], mu[:, None], e_mu[:, None])[None, ...])  # noqa
+            pnorm = normal_logpdf(
+                self.mu_xrange[None, :], mu[:, None], e_mu[:, None])[None, ...]
+            if self.with_homogeneous_malmquist:
+                pnorm += self.log_r2_xrange[None, None, :]
+            if self.with_inhomogeneous_malmquist:
+                pnorm += alpha * log_los_density_grid
+
             pnorm = jnp.exp(pnorm)
             # Now integrate over the radial steps. Shape is `(nsims, ndata)`.
             # No Jacobian here because I integrate over distance, not the
             # distance modulus.
             pnorm = simpson(pnorm, x=self.r_xrange, axis=-1)
 
-            # Jacobian |dr / dmu|_(mu_true), shape is `(n_data)`.
-            jac = jnp.abs(distmod2dist_gradient(mu_true, self.Omega_m))
+            # Jacobian |dr / dmu|_(mu_true_h), shape is `(n_data)`.
+            jac = jnp.abs(distmod2dist_gradient(mu_true_h, self.Omega_m))
 
             # Calculate unnormalized log p(mu). Shape is (nsims, ndata)
-            ll = (
-                + jnp.log(jac)[None, :]
-                + (2 * jnp.log(r_true) - self.log_r2_xrange_mean)[None, :]
-                + alpha * log_density
-                )
+            ll = 0.0
+            if self.with_homogeneous_malmquist:
+                ll += (+ jnp.log(jac)
+                       + (2 * jnp.log(r_true) - self.log_r2_xrange_mean))
+            if self.with_inhomogeneous_malmquist:
+                ll += alpha * log_density
 
             # Subtract the normalization. Shape remains (nsims, ndata)
             ll -= jnp.log(pnorm)
@@ -871,13 +890,13 @@ class PV_LogLikelihood(BaseFlowValidationModel):
             zobs *= 1 + vrad / SPEED_OF_LIGHT
             zobs -= 1.
 
+            # Add the log-likelihood of observed redshifts. Shape remains
+            # `(nsims, ndata)`
             ll += log_likelihood_zobs(
                 self.z_obs[None, :], zobs, e2_cz[None, :])
 
-            if self.with_absolute_calibration:
-                raise NotImplementedError(
-                    "Absolute calibration not implemented for this model. "
-                    "Use `PV_LogLikelihood_NoDistMarg` instead.")
+            if field_calibration_params["sample_h"]:
+                ll += ll_calibration[None, :]
 
             return ll0 + jnp.sum(logsumexp(ll, axis=0)) + self.norm
 

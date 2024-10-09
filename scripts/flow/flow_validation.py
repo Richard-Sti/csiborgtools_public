@@ -116,6 +116,9 @@ def get_models(ksim, get_model_kwargs, mag_selection, void_kwargs,
                      "Pantheon+_groups", "Pantheon+_groups_zSN",
                      "Pantheon+_zSN"]:
             fpath = join(folder, "PV_compilation.hdf5")
+        elif "Carrick2MTFmock" in cat:
+            ki = cat.split("_")[-1]
+            fpath =f"/mnt/extraspace/rstiskalek/csiborg_postprocessing/flow_mock/Carrick2MTFmock_seed{ki}.hdf5"  # noqa
         elif "CF4_TFR" in cat:
             fpath = join(folder, "PV/CF4/CF4_TF-distances.hdf5")
         elif cat in ["CF4_GroupAll"]:
@@ -186,7 +189,7 @@ def run_model(model, nsteps, nburn,  model_kwargs, out_folder,
         neg_ln_evidence_err = (jax.numpy.nan, jax.numpy.nan)
 
     fname = join(out_folder, fname)
-    print(f"Saving results to `{fname}`.")
+    print(f"Saving results: `{fname}`.")
     with File(fname, "w") as f:
         # Write samples
         grp = f.create_group("samples")
@@ -203,15 +206,22 @@ def run_model(model, nsteps, nburn,  model_kwargs, out_folder,
         grp.create_dataset("neg_lnZ_harmonic", data=neg_ln_evidence)
         grp.create_dataset("neg_lnZ_harmonic_err", data=neg_ln_evidence_err)
 
-    fname_summary = fname.replace(".hdf5", ".txt")
-    print(f"Saving summary to `{fname_summary}`.")
-    with open(fname_summary, 'w') as f:
+    fname_config = fname.replace(".hdf5", "_config.txt")
+    print(f"Saving configuration: `{fname_config}`.")
+    with open(fname_config, 'w') as f:
         original_stdout = sys.stdout
         sys.stdout = f
 
         print("User parameters:")
         for kwargs in kwargs_print:
             print_variables(kwargs.keys(), kwargs.values())
+        sys.stdout = original_stdout
+
+    fname_summary = fname.replace(".hdf5", "_summary.txt")
+    print(f"Saving summary: `{fname_summary}`.")
+    with open(fname_summary, 'w') as f:
+        original_stdout = sys.stdout
+        sys.stdout = f
 
         print("HMC summary:")
         print(f"{'BIC':<20} {BIC}")
@@ -238,7 +248,7 @@ def get_distmod_hyperparams(catalogue, sample_alpha, sample_mag_dipole):
                 "alpha_min": alpha_min, "alpha_max": alpha_max,
                 "sample_alpha": sample_alpha
                 }
-    elif catalogue in ["SFI_gals", "2MTF"] or "CF4_TFR" in catalogue or "IndranilVoidTFRMock" in catalogue:  # noqa
+    elif catalogue in ["SFI_gals", "2MTF"] or "CF4_TFR" in catalogue or "IndranilVoidTFRMock" in catalogue or "Carrick2MTFmock" in catalogue:  # noqa
         return {"e_mu_min": 0.001, "e_mu_max": 1.0,
                 "a_mean": -21., "a_std": 5.0,
                 "b_mean": -5.95, "b_std": 4.0,
@@ -247,6 +257,7 @@ def get_distmod_hyperparams(catalogue, sample_alpha, sample_mag_dipole):
                 "sample_a_dipole": sample_mag_dipole,
                 "alpha_min": alpha_min, "alpha_max": alpha_max,
                 "sample_alpha": sample_alpha,
+                "sample_curvature": False if "Carrick2MTFmock" in catalogue else True,  # noqa
                 }
     elif catalogue in ["CF4_GroupAll"]:
         return {"e_mu_min": 0.001, "e_mu_max": 1.0,
@@ -294,8 +305,8 @@ if __name__ == "__main__":
     ###########################################################################
 
     # `None` means default behaviour
-    nsteps = 2_000
-    nburn = 2_000
+    nsteps = 1_500
+    nburn = 1_500
     zcmb_min = None
     zcmb_max = 0.05
     nchains_harmonic = 10
@@ -310,8 +321,15 @@ if __name__ == "__main__":
     sample_mag_dipole = False
     wo_num_dist_marginalisation = False
     absolute_calibration = None
-    calculate_harmonic = (False if inference_method == "bayes" else True) and (not wo_num_dist_marginalisation)  # noqa
+    calculate_harmonic = (False if (inference_method == "bayes") else True) and (not wo_num_dist_marginalisation)  # noqa
     sample_h = True if absolute_calibration is not None else False
+
+    # These mocks are generated without a density field, so there is no
+    # inhomogeneous Malmquist and we also do not need evidences.
+    for catalogue in ARGS.catalogue:
+        if "Carrick2MTFmock" in catalogue:
+            sample_alpha = False
+            calculate_harmonic = False
 
     fname_kwargs = {"inference_method": inference_method,
                     "smooth": ARGS.ksmooth,
@@ -375,7 +393,7 @@ if __name__ == "__main__":
                                "Vmono_min": -1000, "Vmono_max": 1000,
                                "beta_min": -10.0, "beta_max": 10.0,
                                "sigma_v_min": 1.0, "sigma_v_max": 1000 if "IndranilVoid_" in ARGS.simname else 750.,  # noqa
-                               "h_min": 0.01, "h_max": 5.0,
+                               "h_min": 0.25, "h_max": 1.,
                                "no_Vext": False if no_Vext is None else no_Vext,        # noqa
                                "sample_Vmag_vax": sample_Vmag_vax,
                                "sample_Vmono": sample_Vmono,
